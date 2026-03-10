@@ -12,24 +12,34 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 type Row = Record<string, string>;
+const PAGE_SIZE = 20;
 
-export default function StocksTable() {
+export default function StocksTable({ screener }: { screener: string }) {
   const [headers, setHeaders] = useState<string[]>([]);
   const [rows, setRows] = useState<Row[]>([]);
   const [sorting, setSorting] = useState<SortingState>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
-    fetch("/api/stocks")
-      .then((r) => r.json())
+    setPage(1);
+  }, [screener]);
+
+  useEffect(() => {
+    setLoading(true);
+    setRows([]);
+    setHeaders([]);
+    const r = (page - 1) * PAGE_SIZE + 1;
+    fetch(`/api/stocks?screener=${screener}&r=${r}`)
+      .then((res) => res.json())
       .then((data) => {
         setHeaders(data.headers ?? []);
         setRows(data.rows ?? []);
       })
       .catch(() => setError("Failed to load stock data."))
       .finally(() => setLoading(false));
-  }, []);
+  }, [screener, page]);
 
   const columns: ColumnDef<Row>[] = headers.map((h) => ({
     accessorKey: h,
@@ -58,6 +68,8 @@ export default function StocksTable() {
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
   });
+
+  const isLastPage = rows.length < PAGE_SIZE;
 
   if (loading) return <p className="text-zinc-400">Loading stocks...</p>;
   if (error) return <p className="text-red-500">{error}</p>;
@@ -106,6 +118,26 @@ export default function StocksTable() {
           ))}
         </tbody>
       </table>
+
+      <div className="flex items-center justify-between mt-4">
+        <button
+          onClick={() => setPage((p) => Math.max(1, p - 1))}
+          disabled={page === 1}
+          className="px-3 py-1.5 text-xs font-medium rounded border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-900 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+        >
+          ← Previous
+        </button>
+        <span className="text-xs text-zinc-400">
+          Records {(page - 1) * PAGE_SIZE + 1}–{(page - 1) * PAGE_SIZE + rows.length}
+        </span>
+        <button
+          onClick={() => setPage((p) => p + 1)}
+          disabled={isLastPage}
+          className="px-3 py-1.5 text-xs font-medium rounded border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-900 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+        >
+          Next →
+        </button>
+      </div>
     </div>
   );
 }
