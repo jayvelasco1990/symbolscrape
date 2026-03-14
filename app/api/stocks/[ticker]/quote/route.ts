@@ -148,17 +148,8 @@ async function scrapeFinviz(symbol: string) {
   );
   if (!$) return null;
 
-  const price =
-    $("strong.quote-price, .snapshot-td2 b").first().text().trim() ||
-    $("table.fullview-title").find("b").last().text().trim() ||
-    "";
-
-  const description =
-    $("td.fullview-profile").text().trim() ||
-    $('[class*="body-text"]').text().trim() ||
-    "";
-
   const stats: Record<string, string> = {};
+
   $("table.snapshot-table2 tr, table.fullview-ratings-outer tr").each((_, row) => {
     const cells = $(row).find("td");
     for (let i = 0; i + 1 < cells.length; i += 2) {
@@ -168,6 +159,13 @@ async function scrapeFinviz(symbol: string) {
     }
   });
 
+  const price = stats["Price"] ?? "";
+
+  const description =
+    $("td.fullview-profile").text().trim() ||
+    $('[class*="body-text"]').text().trim() ||
+    "";
+
   const pick = (keys: string[]) => {
     const row: Record<string, string> = {};
     keys.forEach((k) => { if (stats[k]) row[k] = stats[k]; });
@@ -175,15 +173,46 @@ async function scrapeFinviz(symbol: string) {
   };
 
   const financials = {
-    incomeStatement: pick(["Revenue", "Revenue/sh", "Sales Q/Q", "EPS (ttm)",
+    incomeStatement: pick(["Sales", "Income", "Sales Q/Q", "EPS (ttm)",
       "EPS next Y", "EPS this Y", "EPS Q/Q", "Gross Margin",
       "Oper. Margin", "Profit Margin", "ROE", "ROA", "ROI"]),
-    balanceSheet: pick(["Market Cap", "Book/sh", "Cash/sh", "Debt/Eq",
+    balanceSheet: pick(["Market Cap", "Enterprise Value", "Book/sh", "Cash/sh", "Debt/Eq",
       "LT Debt/Eq", "Current Ratio", "Quick Ratio", "Shs Outstand", "Shs Float"]),
-    cashFlow: pick(["P/FCF", "FCF/sh", "P/C", "Cash/sh"]),
+    cashFlow: pick(["EV/EBITDA", "P/FCF", "FCF/sh", "P/C", "Cash/sh"]),
   };
 
   return { price, description, financials, stats };
+}
+
+function parseFormatted(s: string): number {
+  const n = parseFloat(s.replace(/[^0-9.]/g, ""));
+  if (!n) return 0;
+  if (s.includes("T")) return n * 1e12;
+  if (s.includes("B")) return n * 1e9;
+  if (s.includes("M")) return n * 1e6;
+  return n;
+}
+
+function calcDebtMetrics(stats: Record<string, string>): { debtToRevenue: string; debtToEbitda: string } {
+  const parseVal = (s: string) => parseFloat(s.replace(/[^0-9.-]/g, "")) || 0;
+
+  // Derive total debt from Debt/Equity × (Book/sh × Shares Outstanding)
+  const debtEq = parseVal(stats["Debt/Eq"] ?? "");
+  const bookSh = parseVal(stats["Book/sh"] ?? "");
+  const shsOutstand = parseFormatted(stats["Shs Outstand"] ?? "");
+  const totalDebt = debtEq * bookSh * shsOutstand;
+
+  // Debt / Revenue  (Finviz key is "Sales")
+  const sales = parseFormatted(stats["Sales"] ?? "");
+  const debtToRevenue = totalDebt && sales ? (totalDebt / sales).toFixed(2) : "";
+
+  // Debt / EBITDA  (EBITDA = Enterprise Value / EV/EBITDA)
+  const ev = parseFormatted(stats["Enterprise Value"] ?? "");
+  const evEbitda = parseVal(stats["EV/EBITDA"] ?? "");
+  const ebitda = ev && evEbitda ? ev / evEbitda : 0;
+  const debtToEbitda = totalDebt && ebitda ? (totalDebt / ebitda).toFixed(2) : "";
+
+  return { debtToRevenue, debtToEbitda };
 }
 
 function calcIntrinsicValue(stats: Record<string, string>) {
@@ -219,9 +248,9 @@ export async function GET(
   ]);
 
   const intrinsicValue = calcIntrinsicValue(finviz?.stats ?? {});
+  const { debtToRevenue, debtToEbitda } = calcDebtMetrics(finviz?.stats ?? {});
 
   const hasReutersData =
-    reuters.description ||
     reuters.financials.incomeStatement.length ||
     reuters.financials.balanceSheet.length ||
     reuters.financials.cashFlow.length;
@@ -231,7 +260,9 @@ export async function GET(
       ticker: symbol,
       ...reuters,
       price: finviz?.price || reuters.price,
+      description: finviz?.description || reuters.description,
       intrinsicValue,
+      debtToRevenue, debtToEbitda,
     });
   }
 
@@ -242,6 +273,7 @@ export async function GET(
       ...finvizWithoutStats,
       priceChange: "",
       intrinsicValue,
+      debtToRevenue, debtToEbitda,
     });
   }
 
@@ -252,5 +284,7 @@ export async function GET(
     description: "",
     financials: { incomeStatement: [], balanceSheet: [], cashFlow: [] },
     intrinsicValue,
+    debtToRevenue: "",
+    debtToEbitda: "",
   });
 }
