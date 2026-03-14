@@ -16,9 +16,6 @@
 
 ## Screenshots
 
-> Replace the placeholders below with screenshots from your running app.
-> Suggested captures: landing page, screener table, stock detail (intrinsic value), debt metrics card.
-
 | Landing Page | Stock Screener |
 |:---:|:---:|
 | ![Landing](docs/screenshots/landing.png) | ![Screener](docs/screenshots/screener.png) |
@@ -26,6 +23,8 @@
 | Intrinsic Value | Debt Metrics |
 |:---:|:---:|
 | ![Intrinsic Value](docs/screenshots/intrinsic-value.png) | ![Debt Metrics](docs/screenshots/debt-metrics.png) |
+
+![Stock Detail](docs/screenshots/stock-detail.png)
 
 ---
 
