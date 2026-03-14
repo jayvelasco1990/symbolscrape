@@ -47,9 +47,13 @@ export default function StocksTable({ screener }: { screener: string }) {
     cell: (info) => {
       const value = info.getValue() as string;
       if (h === "Ticker") {
+        const price = info.row.original["Price"] ?? "";
+        const href = price
+          ? `/stocks/${value}?price=${encodeURIComponent(price)}`
+          : `/stocks/${value}`;
         return (
           <Link
-            href={`/stocks/${value}`}
+            href={href}
             className="font-semibold text-blue-600 dark:text-blue-400 hover:underline"
           >
             {value}

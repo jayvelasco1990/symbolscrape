@@ -75,7 +75,6 @@ function parseTables($: ReturnType<typeof cheerio.load>) {
   return out;
 }
 
-// --- Reuters ---
 async function scrapeReuters(symbol: string) {
   const base = `https://www.reuters.com/markets/companies/${symbol}`;
   const [$main, $income, $balance, $cashflow] = await Promise.all([
@@ -124,7 +123,11 @@ async function scrapeReuters(symbol: string) {
     }
   }
 
-  const financials = { incomeStatement: [] as Record<string, string>[], balanceSheet: [] as Record<string, string>[], cashFlow: [] as Record<string, string>[] };
+  const financials = {
+    incomeStatement: [] as Record<string, string>[],
+    balanceSheet: [] as Record<string, string>[],
+    cashFlow: [] as Record<string, string>[],
+  };
   if ($income) financials.incomeStatement = parseTables($income).incomeStatement;
   if ($balance) financials.balanceSheet = parseTables($balance).balanceSheet;
   if ($cashflow) financials.cashFlow = parseTables($cashflow).cashFlow;
@@ -138,7 +141,6 @@ async function scrapeReuters(symbol: string) {
   return { price, description, financials };
 }
 
-// --- Finviz fallback ---
 async function scrapeFinviz(symbol: string) {
   const $ = await scrapePage(
     `https://finviz.com/quote.ashx?t=${symbol}`,
@@ -146,19 +148,16 @@ async function scrapeFinviz(symbol: string) {
   );
   if (!$) return null;
 
-  // Price
   const price =
     $("strong.quote-price, .snapshot-td2 b").first().text().trim() ||
     $("table.fullview-title").find("b").last().text().trim() ||
     "";
 
-  // Description
   const description =
     $("td.fullview-profile").text().trim() ||
     $('[class*="body-text"]').text().trim() ||
     "";
 
-  // Extract all snapshot key/value pairs
   const stats: Record<string, string> = {};
   $("table.snapshot-table2 tr, table.fullview-ratings-outer tr").each((_, row) => {
     const cells = $(row).find("td");
@@ -180,12 +179,31 @@ async function scrapeFinviz(symbol: string) {
       "EPS next Y", "EPS this Y", "EPS Q/Q", "Gross Margin",
       "Oper. Margin", "Profit Margin", "ROE", "ROA", "ROI"]),
     balanceSheet: pick(["Market Cap", "Book/sh", "Cash/sh", "Debt/Eq",
-      "LT Debt/Eq", "Current Ratio", "Quick Ratio",
-      "Shs Outstand", "Shs Float"]),
+      "LT Debt/Eq", "Current Ratio", "Quick Ratio", "Shs Outstand", "Shs Float"]),
     cashFlow: pick(["P/FCF", "FCF/sh", "P/C", "Cash/sh"]),
   };
 
-  return { price, description, financials };
+  return { price, description, financials, stats };
+}
+
+function calcIntrinsicValue(stats: Record<string, string>) {
+  const parseVal = (s: string) => parseFloat(s.replace(/[^0-9.-]/g, "")) || 0;
+  const eps = parseVal(stats["EPS (ttm)"] ?? "");
+  const bookSh = parseVal(stats["Book/sh"] ?? "");
+
+  if (eps <= 0 || bookSh <= 0) {
+    return {
+      fairValue: "",
+      formula: "Graham Number = √(22.5 × EPS × Book/sh)",
+      note: eps <= 0 ? "Negative or zero EPS — Graham Number not applicable" : "",
+    };
+  }
+
+  return {
+    fairValue: Math.sqrt(22.5 * eps * bookSh).toFixed(2),
+    formula: "Graham Number = √(22.5 × EPS × Book/sh)",
+    note: "",
+  };
 }
 
 export async function GET(
@@ -195,23 +213,44 @@ export async function GET(
   const { ticker } = await params;
   const symbol = ticker.toUpperCase();
 
-  const reuters = await scrapeReuters(symbol);
+  const [reuters, finviz] = await Promise.all([
+    scrapeReuters(symbol),
+    scrapeFinviz(symbol),
+  ]);
 
-  const hasData =
-    reuters.price || reuters.description ||
+  const intrinsicValue = calcIntrinsicValue(finviz?.stats ?? {});
+
+  const hasReutersData =
+    reuters.description ||
     reuters.financials.incomeStatement.length ||
     reuters.financials.balanceSheet.length ||
     reuters.financials.cashFlow.length;
 
-  if (hasData) {
-    return NextResponse.json({ ticker: symbol, ...reuters, source: "reuters" });
+  if (hasReutersData) {
+    return NextResponse.json({
+      ticker: symbol,
+      ...reuters,
+      price: finviz?.price || reuters.price,
+      intrinsicValue,
+    });
   }
 
-  // Fallback to Finviz
-  const finviz = await scrapeFinviz(symbol);
   if (finviz) {
-    return NextResponse.json({ ticker: symbol, ...finviz, priceChange: "", source: "finviz" });
+    const { stats: _, ...finvizWithoutStats } = finviz;
+    return NextResponse.json({
+      ticker: symbol,
+      ...finvizWithoutStats,
+      priceChange: "",
+      intrinsicValue,
+    });
   }
 
-  return NextResponse.json({ ticker: symbol, price: "", priceChange: "", description: "", financials: { incomeStatement: [], balanceSheet: [], cashFlow: [] }, source: "none" });
+  return NextResponse.json({
+    ticker: symbol,
+    price: "",
+    priceChange: "",
+    description: "",
+    financials: { incomeStatement: [], balanceSheet: [], cashFlow: [] },
+    intrinsicValue,
+  });
 }

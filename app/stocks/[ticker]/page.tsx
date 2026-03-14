@@ -3,10 +3,12 @@ import StockDetail from "@/app/components/StockDetail";
 
 interface Props {
   params: Promise<{ ticker: string }>;
+  searchParams: Promise<{ price?: string }>;
 }
 
-export default async function StockPage({ params }: Props) {
+export default async function StockPage({ params, searchParams }: Props) {
   const { ticker } = await params;
+  const { price } = await searchParams;
   const symbol = ticker.toUpperCase();
 
   return (
@@ -20,7 +22,7 @@ export default async function StockPage({ params }: Props) {
 
       <h1 className="text-4xl font-bold text-zinc-900 dark:text-zinc-50 mb-6">{symbol}</h1>
 
-      <StockDetail ticker={ticker} />
+      <StockDetail ticker={ticker} initialPrice={price} />
     </div>
   );
 }
