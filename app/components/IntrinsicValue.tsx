@@ -9,6 +9,10 @@ function parseNum(s: string) {
   return parseFloat(s.replace(/[^0-9.-]/g, "")) || 0;
 }
 
+function fmt(n: number) {
+  return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 export default function IntrinsicValue({ price, fairValue, formula, note }: Props) {
   const hasAny = price || fairValue;
   if (!hasAny) return null;
@@ -55,13 +59,13 @@ export default function IntrinsicValue({ price, fairValue, formula, note }: Prop
         <div>
           <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-1">Stock Price</p>
           <p className="text-xl font-bold text-zinc-900 dark:text-zinc-50">
-            {priceNum ? `$${priceNum.toFixed(2)}` : "—"}
+            {priceNum ? `$${fmt(priceNum)}` : "—"}
           </p>
         </div>
         <div>
           <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-1">Graham Number</p>
           <p className="text-xl font-bold text-zinc-900 dark:text-zinc-50">
-            {fairValue ? `$${fairValue}` : "—"}
+            {fairValue ? `$${fmt(parseNum(fairValue))}` : "—"}
           </p>
         </div>
         <div>
@@ -83,7 +87,7 @@ export default function IntrinsicValue({ price, fairValue, formula, note }: Prop
           <div className="flex justify-between text-xs text-zinc-400 mb-1">
             <span>$0</span>
             <span className="font-medium text-zinc-500 dark:text-zinc-400">
-              Graham Number {fairValue ? `$${fairValue}` : ""}
+              Graham Number {fair ? `$${fmt(fair)}` : ""}
             </span>
           </div>
           <div className="relative h-2 bg-zinc-200 dark:bg-zinc-700 rounded-full overflow-hidden">

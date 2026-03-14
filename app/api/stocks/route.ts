@@ -1,20 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as cheerio from "cheerio";
 
-const SCREENERS: Record<string, string> = {
-  megacap:
-    "https://finviz.com/screener.ashx?v=111&f=cap_mega%2Cfa_div_pos%2Cta_beta_u1%2Cta_rsi_nob50&ft=3",
-  largecap:
-    "https://finviz.com/screener.ashx?v=111&f=cap_large,fa_div_pos,geo_usa,ta_beta_u1,ta_rsi_nob50&o=pe",
-  smallcap:
-    "https://finviz.com/screener.ashx?v=111&f=cap_small,fa_div_pos,geo_usa,ta_beta_u1,ta_rsi_nob50&o=pe",
+const SCREENERS: Record<string, { filters: string; extra?: string }> = {
+  megacap:  { filters: "cap_mega",  extra: "&o=pe&ft=3" },
+  largecap: { filters: "cap_large,geo_usa", extra: "&o=pe" },
+  smallcap: { filters: "cap_small,geo_usa", extra: "&o=pe" },
 };
 
 export async function GET(request: NextRequest) {
   const screener = request.nextUrl.searchParams.get("screener") ?? "megacap";
-  const r = request.nextUrl.searchParams.get("r") ?? "1";
-  const baseUrl = SCREENERS[screener] ?? SCREENERS.megacap;
-  const url = `${baseUrl}&r=${r}`;
+  const r        = request.nextUrl.searchParams.get("r") ?? "1";
+  const dividend = request.nextUrl.searchParams.get("dividend") === "true";
+  const rsi      = request.nextUrl.searchParams.get("rsi") === "true";
+
+  const cfg = SCREENERS[screener] ?? SCREENERS.megacap;
+  const filters = [
+    cfg.filters,
+    dividend ? "fa_div_pos" : "",
+    "ta_beta_u1",
+    rsi ? "ta_rsi_nob50" : "",
+  ].filter(Boolean).join(",");
+
+  const url = `https://finviz.com/screener.ashx?v=111&f=${filters}${cfg.extra ?? ""}&r=${r}`;
 
   const res = await fetch(url, {
     headers: {

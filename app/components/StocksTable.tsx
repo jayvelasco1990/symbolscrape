@@ -17,10 +17,12 @@ const PAGE_SIZE = 20;
 interface Props {
   screener: string;
   page: number;
+  dividend: boolean;
+  rsi: boolean;
   onPageChange: (page: number) => void;
 }
 
-export default function StocksTable({ screener, page, onPageChange }: Props) {
+export default function StocksTable({ screener, page, dividend, rsi, onPageChange }: Props) {
   const [headers, setHeaders] = useState<string[]>([]);
   const [rows, setRows] = useState<Row[]>([]);
   const [sorting, setSorting] = useState<SortingState>([]);
@@ -32,7 +34,7 @@ export default function StocksTable({ screener, page, onPageChange }: Props) {
     setRows([]);
     setHeaders([]);
     const r = (page - 1) * PAGE_SIZE + 1;
-    fetch(`/api/stocks?screener=${screener}&r=${r}`)
+    fetch(`/api/stocks?screener=${screener}&r=${r}&dividend=${dividend}&rsi=${rsi}`)
       .then((res) => res.json())
       .then((data) => {
         setHeaders(data.headers ?? []);
@@ -40,7 +42,7 @@ export default function StocksTable({ screener, page, onPageChange }: Props) {
       })
       .catch(() => setError("Failed to load stock data."))
       .finally(() => setLoading(false));
-  }, [screener, page]);
+  }, [screener, page, dividend, rsi]);
 
   const columns: ColumnDef<Row>[] = headers.map((h) => ({
     accessorKey: h,
@@ -49,7 +51,7 @@ export default function StocksTable({ screener, page, onPageChange }: Props) {
       const value = info.getValue() as string;
       if (h === "Ticker") {
         const price = info.row.original["Price"] ?? "";
-        const back = encodeURIComponent(`/screener?tab=${screener}&page=${page}`);
+        const back = encodeURIComponent(`/screener?tab=${screener}&page=${page}&dividend=${dividend}&rsi=${rsi}`);
         const href = `/stocks/${value}?price=${encodeURIComponent(price)}&back=${back}`;
         return (
           <Link
