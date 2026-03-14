@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import IntrinsicValue from "./IntrinsicValue";
+import DebtMetrics from "./DebtMetrics";
 
 type TableRow = Record<string, string>;
 
@@ -20,6 +21,8 @@ interface QuoteData {
     formula?: string;
     note?: string;
   };
+  debtToRevenue?: string;
+  debtToEbitda?: string;
 }
 
 function FinancialTable({ title, rows }: { title: string; rows: TableRow[] }) {
@@ -90,6 +93,8 @@ export default function StockDetail({ ticker, initialPrice }: { ticker: string; 
           note={iv.note}
         />
       )}
+
+      <DebtMetrics debtToRevenue={data.debtToRevenue} debtToEbitda={data.debtToEbitda} />
 
       {data.description && (
         <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 p-4">

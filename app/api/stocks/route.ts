@@ -6,6 +6,8 @@ const SCREENERS: Record<string, string> = {
     "https://finviz.com/screener.ashx?v=111&f=cap_mega%2Cfa_div_pos%2Cta_beta_u1%2Cta_rsi_nob50&ft=3",
   largecap:
     "https://finviz.com/screener.ashx?v=111&f=cap_large,fa_div_pos,geo_usa,ta_beta_u1,ta_rsi_nob50&o=pe",
+  smallcap:
+    "https://finviz.com/screener.ashx?v=111&f=cap_small,fa_div_pos,geo_usa,ta_beta_u1,ta_rsi_nob50&o=pe",
 };
 
 export async function GET(request: NextRequest) {
