@@ -215,6 +215,57 @@ function calcDebtMetrics(stats: Record<string, string>): { debtToRevenue: string
   return { debtToRevenue, debtToEbitda };
 }
 
+function calcDividendMetrics(stats: Record<string, string>) {
+  const parseVal = (s: string) => parseFloat(s.replace(/[^0-9.-]/g, "")) || 0;
+
+  // "Dividend TTM: 2.06 (2.66%)" — parse amount and yield
+  const divTTM = stats["Dividend TTM"] ?? "";
+  const amountMatch = divTTM.match(/^([\d.]+)/);
+  const yieldMatch  = divTTM.match(/\(([\d.]+)%\)/);
+  const annualAmount = amountMatch ? parseFloat(amountMatch[1]) : 0;
+  const yieldPct     = yieldMatch  ? parseFloat(yieldMatch[1])  : 0;
+
+  if (!annualAmount && !yieldPct) return null;
+
+  // Payout ratio — already a percentage string e.g. "67.13%"
+  const payoutPct = parseVal(stats["Payout"] ?? "");
+
+  // FCF coverage: FCF/sh = Price / P/FCF
+  const price  = parseVal(stats["Price"] ?? "");
+  const pfcf   = parseVal(stats["P/FCF"] ?? "");
+  const fcfSh  = price && pfcf ? price / pfcf : 0;
+  const fcfCoverage = annualAmount && fcfSh ? fcfSh / annualAmount : 0;
+
+  // Dividend growth "5.04% 4.46%" → [3Y, 5Y]
+  const divGrStr = stats["Dividend Gr. 3/5Y"] ?? "";
+  const grMatches = divGrStr.match(/([-\d.]+)%/g) ?? [];
+  const growth3Y = grMatches[0] ?? "";
+  const growth5Y = grMatches[1] ?? "";
+
+  // Sustainability: combine payout and FCF coverage
+  let sustainability: "healthy" | "moderate" | "risk" | "unknown" = "unknown";
+  if (payoutPct > 0 || fcfCoverage > 0) {
+    const payoutOk  = payoutPct > 0 && payoutPct <= 60;
+    const fcfOk     = fcfCoverage >= 1.2;
+    const payoutWarn = payoutPct > 60 && payoutPct <= 80;
+    const fcfWarn    = fcfCoverage >= 0.8 && fcfCoverage < 1.2;
+    if ((payoutPct <= 60 || !payoutPct) && (fcfCoverage >= 1.2 || !fcfCoverage)) sustainability = "healthy";
+    else if (payoutOk || fcfOk) sustainability = "healthy";
+    else if (payoutWarn || fcfWarn) sustainability = "moderate";
+    else sustainability = "risk";
+  }
+
+  return {
+    annualAmount: annualAmount ? annualAmount.toFixed(2) : "",
+    yieldPct: yieldPct ? yieldPct.toFixed(2) : "",
+    payoutPct: payoutPct ? payoutPct.toFixed(1) : "",
+    fcfCoverage: fcfCoverage ? fcfCoverage.toFixed(2) : "",
+    growth3Y,
+    growth5Y,
+    sustainability,
+  };
+}
+
 function calcIntrinsicValue(stats: Record<string, string>) {
   const parseVal = (s: string) => parseFloat(s.replace(/[^0-9.-]/g, "")) || 0;
   const eps = parseVal(stats["EPS (ttm)"] ?? "");
@@ -247,8 +298,9 @@ export async function GET(
     scrapeFinviz(symbol),
   ]);
 
-  const intrinsicValue = calcIntrinsicValue(finviz?.stats ?? {});
+  const intrinsicValue  = calcIntrinsicValue(finviz?.stats ?? {});
   const { debtToRevenue, debtToEbitda } = calcDebtMetrics(finviz?.stats ?? {});
+  const dividendMetrics = calcDividendMetrics(finviz?.stats ?? {});
 
   const hasReutersData =
     reuters.financials.incomeStatement.length ||
@@ -262,7 +314,7 @@ export async function GET(
       price: finviz?.price || reuters.price,
       description: finviz?.description || reuters.description,
       intrinsicValue,
-      debtToRevenue, debtToEbitda,
+      debtToRevenue, debtToEbitda, dividendMetrics,
     });
   }
 
@@ -273,7 +325,7 @@ export async function GET(
       ...finvizWithoutStats,
       priceChange: "",
       intrinsicValue,
-      debtToRevenue, debtToEbitda,
+      debtToRevenue, debtToEbitda, dividendMetrics,
     });
   }
 
@@ -284,6 +336,7 @@ export async function GET(
     description: "",
     financials: { incomeStatement: [], balanceSheet: [], cashFlow: [] },
     intrinsicValue,
+    dividendMetrics: null,
     debtToRevenue: "",
     debtToEbitda: "",
   });

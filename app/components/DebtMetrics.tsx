@@ -83,7 +83,7 @@ function MetricCard({
   barMax: number;
 }) {
   return (
-    <div className="rounded-lg border border-zinc-200 dark:border-zinc-700 p-4">
+    <div className="rounded-lg border border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 p-4">
       <div className="flex items-center justify-between mb-2">
         <p className="text-xs text-zinc-500 dark:text-zinc-400">{label}</p>
         <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${RISK_BADGE[risk]}`}>
@@ -104,8 +104,9 @@ export default function DebtMetrics({ debtToRevenue, debtToEbitda }: Props) {
   const dteVal = parseNum(debtToEbitda ?? "");
 
   return (
-    <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 p-5">
-      <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-4">Debt Metrics</h3>
+    <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-black p-5">
+      <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Debt Metrics</h3>
+      <p className="text-xs text-zinc-400 mt-0.5 mb-4">Derived from Finviz snapshot data</p>
       <div className="grid grid-cols-2 gap-4">
         {debtToRevenue && (
           <MetricCard
