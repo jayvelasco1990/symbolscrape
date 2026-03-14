@@ -77,7 +77,9 @@ No subscriptions. No API keys. No paywalls.
 | Styling | Tailwind CSS v4 |
 | Table | TanStack Table v8 |
 | Scraping | Cheerio (server-side) |
+| Database | SQLite via better-sqlite3 |
 | Data Sources | Finviz, Reuters |
+| Runtime | Node.js 22 |
 | Package Manager | pnpm |
 
 ---
@@ -86,8 +88,74 @@ No subscriptions. No API keys. No paywalls.
 
 ### Prerequisites
 
-- Node.js 18+
-- pnpm
+This project requires **Node.js 22** and **pnpm**. Follow the steps for your OS.
+
+---
+
+#### macOS / Linux
+
+**1. Install nvm**
+
+```bash
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+```
+
+Restart your terminal, then:
+
+```bash
+nvm install 22
+nvm use 22
+node --version  # v22.x.x
+```
+
+**Auto-switching (recommended):** Add to your `~/.zshrc` (zsh) or `~/.bash_profile` (bash):
+
+```bash
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+
+# zsh only — auto-switch node version on cd
+autoload -U add-zsh-hook
+load-nvmrc() {
+  local nvmrc_path="$(nvm_find_nvmrc)"
+  if [ -n "$nvmrc_path" ]; then
+    local nvmrc_node_version=$(nvm version "$(cat "${nvmrc_path}")")
+    if [ "$nvmrc_node_version" != "$(nvm version)" ]; then
+      nvm use --silent
+    fi
+  fi
+}
+add-zsh-hook chpwd load-nvmrc
+load-nvmrc
+```
+
+With this in place, `cd vpfund` will automatically switch to Node 22.
+
+---
+
+#### Windows
+
+**1. Install nvm-windows**
+
+Download and run the installer from [github.com/coreybutler/nvm-windows/releases](https://github.com/coreybutler/nvm-windows/releases) (`nvm-setup.exe`).
+
+Open a new terminal (PowerShell or CMD as Administrator), then:
+
+```powershell
+nvm install 22
+nvm use 22
+node --version  # v22.x.x
+```
+
+> **Windows build tools:** `better-sqlite3` compiles a native module. You may need to install build tools first:
+> ```powershell
+> npm install -g windows-build-tools
+> ```
+> Or install [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) and select **"Desktop development with C++"**.
+
+---
+
+**2. Install pnpm (all platforms)**
 
 ```bash
 npm install -g pnpm
@@ -100,7 +168,7 @@ npm install -g pnpm
 git clone https://github.com/your-username/vpfund.git
 cd vpfund
 
-# Install dependencies
+# Install dependencies (ensure Node 22 is active first)
 pnpm install
 
 # Start the dev server
@@ -108,6 +176,8 @@ pnpm dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
+
+> **Note:** The project enforces Node 22+ via `.npmrc`. Running `pnpm install` with an older Node version will fail with a clear error.
 
 ---
 
