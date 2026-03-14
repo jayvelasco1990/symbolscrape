@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import IntrinsicValue from "./IntrinsicValue";
 
 type TableRow = Record<string, string>;
 
@@ -13,6 +14,11 @@ interface QuoteData {
     incomeStatement: TableRow[];
     balanceSheet: TableRow[];
     cashFlow: TableRow[];
+  };
+  intrinsicValue?: {
+    fairValue: string;
+    formula?: string;
+    note?: string;
   };
 }
 
@@ -53,7 +59,7 @@ function FinancialTable({ title, rows }: { title: string; rows: TableRow[] }) {
   );
 }
 
-export default function StockDetail({ ticker }: { ticker: string }) {
+export default function StockDetail({ ticker, initialPrice }: { ticker: string; initialPrice?: string }) {
   const [data, setData] = useState<QuoteData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -67,19 +73,22 @@ export default function StockDetail({ ticker }: { ticker: string }) {
   }, [ticker]);
 
   if (loading)
-    return <p className="text-zinc-400 text-sm animate-pulse">Loading data from Reuters...</p>;
+    return <p className="text-zinc-400 text-sm animate-pulse">Loading data...</p>;
   if (error) return <p className="text-red-500 text-sm">{error}</p>;
   if (!data) return null;
 
+  const iv = data.intrinsicValue;
+  const price = initialPrice || data.price || "";
+
   return (
     <div className="flex flex-col gap-4">
-      {data.price && (
-        <div>
-          <span className="text-3xl font-bold text-zinc-900 dark:text-zinc-50">{data.price}</span>
-          {data.priceChange && (
-            <span className="ml-2 text-sm text-zinc-500">{data.priceChange}</span>
-          )}
-        </div>
+      {iv && (
+        <IntrinsicValue
+          price={price}
+          fairValue={iv.fairValue}
+          formula={iv.formula}
+          note={iv.note}
+        />
       )}
 
       {data.description && (
@@ -95,12 +104,13 @@ export default function StockDetail({ ticker }: { ticker: string }) {
       <FinancialTable title="Balance Sheet" rows={data.financials.balanceSheet} />
       <FinancialTable title="Cash Flow" rows={data.financials.cashFlow} />
 
-      {!data.price && !data.description &&
+      {!price && !data.description &&
         !data.financials.incomeStatement.length &&
         !data.financials.balanceSheet.length &&
-        !data.financials.cashFlow.length && (
+        !data.financials.cashFlow.length &&
+        !iv?.fairValue && (
           <p className="text-sm text-zinc-400">
-            No data could be extracted from Reuters for {ticker.toUpperCase()}.
+            No data could be extracted for {ticker.toUpperCase()}.
           </p>
         )}
     </div>
