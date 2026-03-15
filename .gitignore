@@ -24,8 +24,30 @@
 .DS_Store
 *.pem
 
+# macOS
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# editors
+.idea/
+*.swp
+*.swo
+*.suo
+*.user
+
 # claude
 .claude/settings.local.json
+
+# sqlite
+/data
+*.db
 
 # debug
 npm-debug.log*

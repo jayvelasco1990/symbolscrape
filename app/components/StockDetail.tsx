@@ -132,7 +132,15 @@ function extractUnits(rows: TableRow[]): string | undefined {
   return unitCol ?? undefined;
 }
 
-export default function StockDetail({ ticker, initialPrice }: { ticker: string; initialPrice?: string }) {
+export default function StockDetail({
+  ticker,
+  initialPrice,
+  onPriceResolved,
+}: {
+  ticker: string;
+  initialPrice?: string;
+  onPriceResolved?: (price: string) => void;
+}) {
   const [data, setData] = useState<QuoteData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -140,7 +148,11 @@ export default function StockDetail({ ticker, initialPrice }: { ticker: string; 
   useEffect(() => {
     fetch(`/api/stocks/${ticker}/quote`)
       .then((r) => r.json())
-      .then(setData)
+      .then((d: QuoteData) => {
+        setData(d);
+        const resolved = initialPrice || d.price;
+        if (resolved) onPriceResolved?.(resolved);
+      })
       .catch(() => setError("Failed to load stock data."))
       .finally(() => setLoading(false));
   }, [ticker]);
