@@ -4,29 +4,39 @@ const FEATURES = [
   {
     icon: "◈",
     title: "Multi-Cap Screening",
-    body: "Filter across Mega, Large, and Small cap stocks. Every result pays a dividend and meets strict beta and RSI thresholds.",
+    body: "Filter across Mega, Large, and Small cap stocks with optional dividend and RSI filters. Sorted by P/E for instant value ranking.",
   },
   {
     icon: "⬡",
     title: "Graham Number",
-    body: "Each stock detail page calculates the Graham Number — a conservative fair value estimate rooted in earnings and book value.",
+    body: "Each stock detail page calculates the Graham Number — a conservative fair value estimate rooted in earnings and book value — with margin of safety shown live.",
   },
   {
     icon: "◎",
-    title: "Debt Analysis",
-    body: "Instantly see Debt/Revenue and Debt/EBITDA with color-coded risk levels so you can assess leverage at a glance.",
+    title: "Debt & Dividend Analysis",
+    body: "Debt/Revenue and Debt/EBITDA with color-coded risk levels. Dividend sustainability scored by payout ratio and FCF coverage.",
   },
   {
     icon: "◐",
-    title: "Margin of Safety",
-    body: "Compare current price to intrinsic value and see the margin of safety — the cushion between price and fair value.",
+    title: "Watchlist & Portfolio Tracking",
+    body: "Save stocks, enter share quantities, and track total market value — all persisted locally in SQLite. No account required.",
+  },
+  {
+    icon: "◑",
+    title: "Performance vs SPY",
+    body: "Compare your portfolio against the S&P 500 across six time periods. Value-weighted by position size, cached and refreshed daily.",
+  },
+  {
+    icon: "◍",
+    title: "Diversification Score",
+    body: "HHI-based scoring tells you how concentrated your portfolio is, with an effective position count and step-by-step formula explanation.",
   },
 ];
 
 const HOW_IT_WORKS = [
-  { step: "01", title: "Browse the screener", body: "Pick a market cap tier and scan dividend-paying stocks filtered by beta and RSI." },
-  { step: "02", title: "Open a stock", body: "Click any ticker to pull financials, intrinsic value, and debt metrics in seconds." },
-  { step: "03", title: "Assess the value", body: "Use the Graham Number and margin of safety to decide if the price makes sense." },
+  { step: "01", title: "Screen the market", body: "Pick a cap tier, toggle dividend and RSI filters, and scan pre-filtered value candidates sorted by P/E." },
+  { step: "02", title: "Research a stock", body: "Click any ticker to see the Graham Number, margin of safety, debt ratios, dividend sustainability, and financials." },
+  { step: "03", title: "Build your watchlist", body: "Add stocks with one click. Enter quantities to track position value, compare performance vs SPY, and measure diversification." },
 ];
 
 export default function LandingPage() {
@@ -45,7 +55,7 @@ export default function LandingPage() {
             <span className="text-indigo-600 dark:text-indigo-400">Before the market does.</span>
           </h1>
           <p className="mt-6 text-lg text-zinc-500 dark:text-zinc-400 max-w-xl mx-auto leading-relaxed">
-            vpfund screens dividend-paying stocks by beta, RSI, and market cap — then calculates intrinsic value and debt metrics for every ticker.
+            Screen dividend-paying stocks by beta, RSI, and market cap. Calculate intrinsic value, analyze debt and dividends, track a watchlist, and benchmark your portfolio against SPY.
           </p>
           <div className="mt-10 flex flex-col sm:flex-row gap-3 justify-center">
             <Link
@@ -55,10 +65,10 @@ export default function LandingPage() {
               Open Screener →
             </Link>
             <Link
-              href="/screener"
+              href="/watchlist"
               className="px-8 py-3.5 rounded-xl bg-zinc-100 dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-sm font-semibold transition-all border border-zinc-200 dark:border-zinc-700"
             >
-              View Mega Caps
+              View Watchlist
             </Link>
           </div>
         </div>
@@ -69,9 +79,9 @@ export default function LandingPage() {
         <div className="max-w-5xl mx-auto">
           <p className="text-xs font-semibold tracking-widest text-indigo-500 uppercase text-center mb-3">Features</p>
           <h2 className="text-3xl font-bold text-zinc-900 dark:text-zinc-50 text-center mb-12">
-            Everything you need to screen with conviction
+            Everything from screening to portfolio tracking
           </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {FEATURES.map((f) => (
               <div
                 key={f.title}
@@ -91,7 +101,7 @@ export default function LandingPage() {
         <div className="max-w-4xl mx-auto">
           <p className="text-xs font-semibold tracking-widest text-indigo-500 uppercase text-center mb-3">How It Works</p>
           <h2 className="text-3xl font-bold text-zinc-900 dark:text-zinc-50 text-center mb-12">
-            Three steps to a better pick
+            From screener to watchlist in three steps
           </h2>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-8">
             {HOW_IT_WORKS.map((item) => (
@@ -110,7 +120,7 @@ export default function LandingPage() {
         <div className="max-w-2xl mx-auto text-center">
           <h2 className="text-3xl font-bold text-white mb-4">Ready to find value?</h2>
           <p className="text-indigo-200 text-sm mb-8 leading-relaxed">
-            Start with the screener and click any ticker to see its Graham Number, margin of safety, and debt metrics.
+            Screen stocks, research fundamentals, build a watchlist, and track how your portfolio stacks up against the S&P 500.
           </p>
           <Link
             href="/screener"

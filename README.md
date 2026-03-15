@@ -2,7 +2,7 @@
 
 # vpfund
 
-**A value investing toolkit for screening dividend-paying stocks, calculating intrinsic value, and analyzing leverage — all in one place.**
+**A self-hosted value investing toolkit — screen stocks, track a watchlist, and measure portfolio performance vs SPY.**
 
 [![Next.js](https://img.shields.io/badge/Next.js-16-black?style=flat-square&logo=next.js)](https://nextjs.org)
 [![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=white)](https://react.dev)
@@ -20,17 +20,21 @@
 |:---:|:---:|
 | ![Landing](docs/screenshots/landing.png) | ![Screener](docs/screenshots/screener.png) |
 
-| Intrinsic Value | Debt Metrics |
+| Stock Detail | Intrinsic Value |
 |:---:|:---:|
-| ![Intrinsic Value](docs/screenshots/intrinsic-value.png) | ![Debt Metrics](docs/screenshots/debt-metrics.png) |
+| ![Stock Detail](docs/screenshots/stock-detail.png) | ![Intrinsic Value](docs/screenshots/intrinsic-value.png) |
 
-![Stock Detail](docs/screenshots/stock-detail.png)
+| Watchlist | Performance Breakdown |
+|:---:|:---:|
+| ![Watchlist](docs/screenshots/watchlist.png) | ![Performance Breakdown](docs/screenshots/performance-breakdown.png) |
+
+![Debt Metrics](docs/screenshots/debt-metrics.png)
 
 ---
 
 ## What is vpfund?
 
-vpfund is a self-hosted stock research tool built for value investors. It screens dividend-paying stocks across market cap tiers, calculates the **Graham Number** (intrinsic value), and surfaces **Debt/Revenue** and **Debt/EBITDA** ratios with color-coded risk levels — all scraped in real time from Finviz and Reuters.
+vpfund is a self-hosted stock research tool built for value investors. Screen dividend-paying stocks across market cap tiers, calculate the **Graham Number**, analyze leverage, and track a personal watchlist — all backed by a local SQLite database and scraped in real time from Finviz and Reuters.
 
 No subscriptions. No API keys. No paywalls.
 
@@ -66,6 +70,31 @@ No subscriptions. No API keys. No paywalls.
 - Search any ticker from the navbar — independent of the screener
 - Navigates directly to the stock detail page with all metrics populated
 
+### Watchlist
+- Add any stock to your watchlist directly from the detail page with one click
+- Enter share quantities to track **position size** and **total market value**
+- Inline quantity editing — type and press Enter or click away to save
+- Persisted to a local **SQLite** database via `better-sqlite3`
+
+### Portfolio vs SPY Performance
+- Compares your watchlist portfolio against the **SPY benchmark** across 6 time periods: 1W, 1M, 3M, 6M, 1Y, YTD
+- **Value-weighted** by position size when quantities are set; falls back to equal-weight
+- Results cached in SQLite for 6 hours — recalculated on each page visit after cache expires
+- Grouped bar chart (Portfolio in indigo, SPY in amber) with a custom hover tooltip
+
+### Performance Breakdown
+- Per-stock heatmap table — each row is a position, each column a time period
+- Cells color-coded by return magnitude (two shades of green/red)
+- Toggle **vs SPY delta** to show how each stock beats or lags the benchmark per period
+- Sortable by any period or portfolio weight
+- SPY benchmark row pinned at the bottom for direct comparison
+
+### Diversification Score
+- Calculates a **0–100 score** using the Herfindahl-Hirschman Index (HHI)
+- Shows **HHI**, **Effective Number of Positions (ENP)**, top holding %, and top-3 concentration %
+- Four verdicts: Well Diversified · Moderately Diversified · Concentrated · Highly Concentrated
+- Collapsible formula explanation with step-by-step breakdown inline on the page
+
 ---
 
 ## Tech Stack
@@ -76,6 +105,7 @@ No subscriptions. No API keys. No paywalls.
 | Language | TypeScript 5 |
 | Styling | Tailwind CSS v4 |
 | Table | TanStack Table v8 |
+| Charts | Recharts |
 | Scraping | Cheerio (server-side) |
 | Database | SQLite via better-sqlite3 |
 | Data Sources | Finviz, Reuters |
@@ -192,19 +222,32 @@ vpfund/
 │   ├── stocks/
 │   │   └── [ticker]/
 │   │       └── page.tsx                 # Stock detail page
+│   ├── watchlist/
+│   │   ├── page.js                      # Watchlist with market value + diversification score
+│   │   └── performance/
+│   │       └── page.js                  # Per-stock performance breakdown vs SPY
 │   ├── api/
-│   │   └── stocks/
-│   │       ├── route.ts                 # Finviz screener endpoint
-│   │       └── [ticker]/
-│   │           └── quote/
-│   │               └── route.ts         # Quote + intrinsic value + debt metrics endpoint
+│   │   ├── stocks/
+│   │   │   ├── route.ts                 # Finviz screener endpoint
+│   │   │   └── [ticker]/quote/
+│   │   │       └── route.ts             # Quote + intrinsic value + debt metrics
+│   │   ├── watchlist/
+│   │   │   └── route.js                 # GET / POST / PATCH / DELETE watchlist
+│   │   └── performance/
+│   │       └── route.ts                 # Portfolio vs SPY performance (6hr cached)
 │   └── components/
 │       ├── NavBar.tsx                   # Sticky nav with symbol search
 │       ├── SymbolSearch.tsx             # Ticker lookup input
 │       ├── StocksTable.tsx              # Sortable, paginated screener table
 │       ├── StockDetail.tsx              # Stock detail orchestrator
 │       ├── IntrinsicValue.tsx           # Graham Number card with progress bar
-│       └── DebtMetrics.tsx              # Debt/Revenue + Debt/EBITDA cards
+│       ├── DebtMetrics.tsx              # Debt/Revenue + Debt/EBITDA cards
+│       ├── DividendMetrics.tsx          # Dividend sustainability analysis
+│       ├── WatchlistButton.tsx          # Add/remove watchlist toggle
+│       ├── PerformanceChart.tsx         # Recharts grouped bar chart (Portfolio vs SPY)
+│       └── DiversificationScore.tsx     # HHI-based diversification card
+├── lib/
+│   └── db.js                            # SQLite singleton (better-sqlite3)
 ```
 
 ---
@@ -252,12 +295,25 @@ Debt / EBITDA  = Total Debt ÷ (Enterprise Value ÷ EV/EBITDA)
 
 ---
 
+## How Diversification is Calculated
+
+```
+wᵢ     = (price × quantity) / total portfolio value
+HHI    = Σ wᵢ²
+ENP    = 1 / HHI
+Score  = min(ENP / 20, 1) × 100
+```
+
+A portfolio of 20 perfectly equal positions scores **100**. A single position scores **5**. Falls back to equal-weighting if no quantities are set.
+
+---
+
 ## Roadmap
 
 - [ ] Financial charts (revenue, earnings, cash flow over time)
 - [ ] DCF calculator
-- [ ] Watchlist / saved tickers
-- [ ] Export to CSV
+- [ ] Export watchlist to CSV
+- [ ] Price refresh on watchlist (update stored price to current)
 
 ---
 
