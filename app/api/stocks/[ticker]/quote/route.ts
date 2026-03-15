@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as cheerio from "cheerio";
+import { computeRiskProfile, computeRateSensitivity } from "@/lib/riskScores";
 
 const HEADERS = {
   "User-Agent":
@@ -181,7 +182,11 @@ async function scrapeFinviz(symbol: string) {
     cashFlow: pick(["EV/EBITDA", "P/FCF", "FCF/sh", "P/C", "Cash/sh"]),
   };
 
-  return { price, description, financials, stats };
+  // Sector is shown as a link with href containing "sec_" on the Finviz quote page
+  const sector = $('a[href*="sec_"]').first().text().trim();
+  const industry = $('a[href*="ind_"]').first().text().trim();
+
+  return { price, description, financials, stats, sector, industry };
 }
 
 function parseFormatted(s: string): number {
@@ -266,6 +271,56 @@ function calcDividendMetrics(stats: Record<string, string>) {
   };
 }
 
+function calcMoatQuality(stats: Record<string, string>) {
+  const parseVal = (s: string) => parseFloat(s.replace(/[^0-9.-]/g, "")) || 0;
+
+  const roe          = parseVal(stats["ROE"] ?? "");
+  const roic         = parseVal(stats["ROIC"] ?? "");
+  const profitMargin = parseVal(stats["Profit Margin"] ?? "");
+
+  let score = 0;
+  if (roe > 20)         score += 2; else if (roe >= 12)         score += 1;
+  if (roic > 15)        score += 2; else if (roic >= 8)         score += 1;
+  if (profitMargin > 15) score += 2; else if (profitMargin >= 8) score += 1;
+
+  const level =
+    score >= 5 ? "Strong" :
+    score >= 3 ? "Moderate" :
+    score >= 1 ? "Narrow"   : "Weak";
+
+  return {
+    score,
+    level,
+    roe:          stats["ROE"]           ?? "",
+    roic:         stats["ROIC"]          ?? "",
+    profitMargin: stats["Profit Margin"] ?? "",
+    operMargin:   stats["Oper. Margin"]  ?? "",
+  };
+}
+
+function calcInsiderActivity(stats: Record<string, string>) {
+  const parseVal = (s: string) => parseFloat(s.replace(/[^0-9.-]/g, "")) || 0;
+
+  const ownPct   = parseVal(stats["Insider Own"]   ?? "");
+  const transRaw = stats["Insider Trans"] ?? "";
+  const transN   = parseVal(transRaw);
+  const trans    = transRaw.trim().startsWith("-") ? -Math.abs(transN) : transN;
+
+  const trend: "Buying" | "Neutral" | "Selling" =
+    trans > 1 ? "Buying" : trans < -1 ? "Selling" : "Neutral";
+
+  const ownershipLevel: "High" | "Moderate" | "Low" =
+    ownPct >= 10 ? "High" : ownPct >= 3 ? "Moderate" : "Low";
+
+  return {
+    ownershipPct:   stats["Insider Own"]   ?? "",
+    transPct:       stats["Insider Trans"] ?? "",
+    trans,
+    trend,
+    ownershipLevel,
+  };
+}
+
 function calcIntrinsicValue(stats: Record<string, string>) {
   const parseVal = (s: string) => parseFloat(s.replace(/[^0-9.-]/g, "")) || 0;
   const eps = parseVal(stats["EPS (ttm)"] ?? "");
@@ -301,11 +356,17 @@ export async function GET(
   const intrinsicValue  = calcIntrinsicValue(finviz?.stats ?? {});
   const { debtToRevenue, debtToEbitda } = calcDebtMetrics(finviz?.stats ?? {});
   const dividendMetrics = calcDividendMetrics(finviz?.stats ?? {});
+  const moatQuality     = calcMoatQuality(finviz?.stats ?? {});
+  const insiderActivity = calcInsiderActivity(finviz?.stats ?? {});
+  const riskProfile     = computeRiskProfile(finviz?.sector ?? "", finviz?.description || reuters.description);
+  const rateSensitivity = computeRateSensitivity(finviz?.sector ?? "");
 
   const hasReutersData =
     reuters.financials.incomeStatement.length ||
     reuters.financials.balanceSheet.length ||
     reuters.financials.cashFlow.length;
+
+  const quality = { moatQuality, insiderActivity, riskProfile, rateSensitivity };
 
   if (hasReutersData) {
     return NextResponse.json({
@@ -315,6 +376,7 @@ export async function GET(
       description: finviz?.description || reuters.description,
       intrinsicValue,
       debtToRevenue, debtToEbitda, dividendMetrics,
+      ...quality,
     });
   }
 
@@ -326,6 +388,7 @@ export async function GET(
       priceChange: "",
       intrinsicValue,
       debtToRevenue, debtToEbitda, dividendMetrics,
+      ...quality,
     });
   }
 
@@ -339,5 +402,6 @@ export async function GET(
     dividendMetrics: null,
     debtToRevenue: "",
     debtToEbitda: "",
+    ...quality,
   });
 }

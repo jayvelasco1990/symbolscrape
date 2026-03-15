@@ -49,6 +49,9 @@ $RECYCLE.BIN/
 /data
 *.db
 
+# generated docs
+docs/vpfund-marketing.pdf
+
 # debug
 npm-debug.log*
 yarn-debug.log*
