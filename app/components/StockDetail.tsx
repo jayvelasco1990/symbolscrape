@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import IntrinsicValue from "./IntrinsicValue";
 import DebtMetrics from "./DebtMetrics";
 import DividendMetrics from "./DividendMetrics";
+import DisruptionRisk from "./DisruptionRisk";
+import BusinessQuality from "./BusinessQuality";
 
 type TableRow = Record<string, string>;
 
@@ -29,6 +31,23 @@ interface QuoteData {
     growth5Y: string;
     sustainability: "healthy" | "moderate" | "risk" | "unknown";
   } | null;
+  moatQuality?: {
+    score: number;
+    level: "Strong" | "Moderate" | "Narrow" | "Weak";
+    roe: string; roic: string; profitMargin: string; operMargin: string;
+  };
+  insiderActivity?: {
+    ownershipPct: string; transPct: string; trans: number;
+    trend: "Buying" | "Neutral" | "Selling";
+    ownershipLevel: "High" | "Moderate" | "Low";
+  };
+  riskProfile?: {
+    sector: string;
+    climate: { score: number; level: "Low" | "Moderate" | "High" | "Severe"; rationale: string };
+  };
+  rateSensitivity?: {
+    score: number; level: "Low" | "Moderate" | "High" | "Severe"; rationale: string;
+  };
 }
 
 // Format a raw number string for display: 37154298 → 37,154,298
@@ -193,6 +212,26 @@ export default function StockDetail({
       )}
       <DebtMetrics debtToRevenue={data.debtToRevenue} debtToEbitda={data.debtToEbitda} />
       {data.dividendMetrics && <DividendMetrics {...data.dividendMetrics} />}
+
+      {/* ── Business Quality ────────────────────────── */}
+      {data.moatQuality && data.insiderActivity && (
+        <>
+          <SectionLabel>Business Quality</SectionLabel>
+          <BusinessQuality moat={data.moatQuality} insider={data.insiderActivity} />
+        </>
+      )}
+
+      {/* ── Risk Factors ────────────────────────────── */}
+      {data.riskProfile?.sector && data.rateSensitivity && (
+        <>
+          <SectionLabel>Risk Factors</SectionLabel>
+          <DisruptionRisk
+            sector={data.riskProfile.sector}
+            climate={data.riskProfile.climate}
+            rate={data.rateSensitivity}
+          />
+        </>
+      )}
 
       {/* ── About ───────────────────────────────────── */}
       {data.description && (

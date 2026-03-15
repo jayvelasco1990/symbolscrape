@@ -5,6 +5,7 @@ import { useParams, useSearchParams, useRouter } from "next/navigation";
 import { useState } from "react";
 import StockDetail from "@/app/components/StockDetail";
 import WatchlistButton from "@/app/components/WatchlistButton";
+import MacroBanner from "@/app/components/MacroBanner";
 
 export default function StockPage() {
   const params = useParams();
@@ -30,6 +31,7 @@ export default function StockPage() {
         <WatchlistButton ticker={symbol} price={resolvedPrice} />
       </div>
 
+      <MacroBanner />
       <StockDetail ticker={ticker} initialPrice={initialPrice} onPriceResolved={setResolvedPrice} />
     </div>
   );

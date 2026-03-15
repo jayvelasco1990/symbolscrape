@@ -1,5 +1,6 @@
 import Link from "next/link";
 import SymbolSearch from "./SymbolSearch";
+import ClearCacheButton from "./ClearCacheButton";
 
 export default function NavBar() {
   return (
@@ -20,6 +21,12 @@ export default function NavBar() {
         >
           Watchlist
         </Link>
+        <Link
+          href="/macro"
+          className="text-sm font-medium text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+        >
+          Macro
+        </Link>
         <a
           href="https://olui2.fs.ml.com/login/signin.aspx"
           target="_blank"
@@ -29,7 +36,10 @@ export default function NavBar() {
           Merrill Lynch ↗
         </a>
       </div>
-      <SymbolSearch />
+      <div className="flex items-center gap-4">
+        <ClearCacheButton />
+        <SymbolSearch />
+      </div>
     </nav>
   );
 }

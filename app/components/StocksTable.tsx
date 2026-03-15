@@ -44,11 +44,42 @@ export default function StocksTable({ screener, page, dividend, rsi, onPageChang
       .finally(() => setLoading(false));
   }, [screener, page, dividend, rsi]);
 
+  const SIGNAL_STYLE: Record<string, string> = {
+    "Strong Buy": "bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800",
+    "Buy":        "bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800",
+    "Neutral":    "bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800",
+    "Avoid":      "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700",
+    "No Data":    "",
+  };
+
   const columns: ColumnDef<Row>[] = headers.map((h) => ({
     accessorKey: h,
     header: h,
     cell: (info) => {
       const value = info.getValue() as string;
+
+      if (h === "Signal") {
+        if (value === "No Data") {
+          return (
+            <span
+              className="text-zinc-300 dark:text-zinc-600 text-[10px]"
+              title="Insufficient data to compute signal (P/B unavailable)"
+            >
+              —
+            </span>
+          );
+        }
+        const cls = SIGNAL_STYLE[value] ?? SIGNAL_STYLE["Avoid"];
+        return (
+          <span
+            className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap ${cls}`}
+            title="Graham Rule (PE×PB<22.5) + P/E<20 + P/FCF<35 + EPS growth"
+          >
+            {value}
+          </span>
+        );
+      }
+
       if (h === "Ticker") {
         const price = info.row.original["Price"] ?? "";
         const back = encodeURIComponent(`/screener?tab=${screener}&page=${page}&dividend=${dividend}&rsi=${rsi}`);
@@ -62,6 +93,7 @@ export default function StocksTable({ screener, page, dividend, rsi, onPageChang
           </Link>
         );
       }
+
       return value;
     },
   }));
