@@ -19,13 +19,21 @@ export async function POST(req) {
 }
 
 export async function PATCH(req) {
-  const { ticker, quantity } = await req.json();
+  const { ticker, quantity, unit_cost } = await req.json();
   if (!ticker) return NextResponse.json({ error: "ticker required" }, { status: 400 });
   const db = getDb();
-  db.prepare("UPDATE watchlist SET quantity = ? WHERE ticker = ?").run(
-    Math.max(0, parseInt(quantity) || 0),
-    ticker.toUpperCase()
-  );
+  if (quantity !== undefined) {
+    db.prepare("UPDATE watchlist SET quantity = ? WHERE ticker = ?").run(
+      Math.max(0, parseInt(quantity) || 0),
+      ticker.toUpperCase()
+    );
+  }
+  if (unit_cost !== undefined) {
+    db.prepare("UPDATE watchlist SET unit_cost = ? WHERE ticker = ?").run(
+      unit_cost === null ? null : Math.max(0, parseFloat(unit_cost) || 0),
+      ticker.toUpperCase()
+    );
+  }
   return NextResponse.json({ ticker: ticker.toUpperCase() });
 }
 

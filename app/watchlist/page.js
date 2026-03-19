@@ -12,34 +12,67 @@ function fmt(n) {
 }
 
 
-function QuantityCell({ item, onUpdate }) {
-  const [val, setVal] = useState(String(item.quantity || ""));
+function EditableCell({ value, onSave, placeholder, step = "1", width = "w-20" }) {
+  const [val, setVal] = useState(value != null ? String(value) : "");
   const [saving, setSaving] = useState(false);
 
   async function save() {
-    const qty = parseInt(val) || 0;
-    if (qty === (item.quantity || 0)) return;
+    if (val === (value != null ? String(value) : "")) return;
     setSaving(true);
-    await fetch("/api/watchlist", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ticker: item.ticker, quantity: qty }),
-    });
+    await onSave(val);
     setSaving(false);
-    onUpdate(item.ticker, qty);
   }
 
   return (
     <input
       type="number"
       min="0"
+      step={step}
       value={val}
       onChange={(e) => setVal(e.target.value)}
       onBlur={save}
       onKeyDown={(e) => e.key === "Enter" && e.target.blur()}
       disabled={saving}
+      placeholder={placeholder}
+      className={`${width} px-2 py-1 text-sm text-right rounded-md border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:opacity-50`}
+    />
+  );
+}
+
+function QuantityCell({ item, onUpdate }) {
+  return (
+    <EditableCell
+      value={item.quantity || null}
       placeholder="0"
-      className="w-20 px-2 py-1 text-sm text-right rounded-md border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:opacity-50"
+      onSave={async (val) => {
+        const qty = parseInt(val) || 0;
+        await fetch("/api/watchlist", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ticker: item.ticker, quantity: qty }),
+        });
+        onUpdate(item.ticker, "quantity", qty);
+      }}
+    />
+  );
+}
+
+function UnitCostCell({ item, onUpdate }) {
+  return (
+    <EditableCell
+      value={item.unit_cost != null ? item.unit_cost : null}
+      placeholder="0.00"
+      step="0.01"
+      width="w-24"
+      onSave={async (val) => {
+        const cost = parseFloat(val) || null;
+        await fetch("/api/watchlist", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ticker: item.ticker, unit_cost: cost }),
+        });
+        onUpdate(item.ticker, "unit_cost", cost);
+      }}
     />
   );
 }
@@ -64,9 +97,9 @@ export default function WatchlistPage() {
     }
   }
 
-  function handleQuantityUpdate(ticker, quantity) {
+  function handleFieldUpdate(ticker, field, value) {
     setItems((prev) =>
-      prev.map((i) => (i.ticker === ticker ? { ...i, quantity } : i))
+      prev.map((i) => (i.ticker === ticker ? { ...i, [field]: value } : i))
     );
   }
 
@@ -86,6 +119,19 @@ export default function WatchlistPage() {
     const qty = parseInt(item.quantity) || 0;
     return sum + price * qty;
   }, 0);
+
+  const totalCostBasis = items.reduce((sum, item) => {
+    const cost = parseFloat(item.unit_cost) || 0;
+    const qty = parseInt(item.quantity) || 0;
+    return sum + cost * qty;
+  }, 0);
+
+  const hasUnitCosts = items.some((i) => i.unit_cost != null && i.unit_cost > 0);
+  const unrealizedGL = hasUnitCosts && totalCostBasis > 0 ? totalValue - totalCostBasis : null;
+  const unrealizedGLPct =
+    unrealizedGL !== null && totalCostBasis > 0
+      ? (unrealizedGL / totalCostBasis) * 100
+      : null;
 
   const totalShares = items.reduce((sum, item) => sum + (parseInt(item.quantity) || 0), 0);
 
@@ -126,6 +172,37 @@ export default function WatchlistPage() {
                 {totalValue > 0 ? `$${fmt(totalValue)}` : "—"}
               </p>
               <p className="text-xs text-zinc-400 mt-1">Based on price at time of adding</p>
+            </div>
+            <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-black px-6 py-5">
+              <p className="text-xs font-semibold tracking-widest text-indigo-500 dark:text-indigo-400 uppercase mb-1">
+                Total Cost Basis
+              </p>
+              <p className="text-2xl font-bold text-zinc-900 dark:text-zinc-50">
+                {totalCostBasis > 0 ? `$${fmt(totalCostBasis)}` : "—"}
+              </p>
+              <p className="text-xs text-zinc-400 mt-1">
+                {hasUnitCosts ? "Sum of unit cost × shares" : "Enter unit costs below"}
+              </p>
+            </div>
+            <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-black px-6 py-5">
+              <p className="text-xs font-semibold tracking-widest text-indigo-500 dark:text-indigo-400 uppercase mb-1">
+                Unrealized G/L
+              </p>
+              {unrealizedGL !== null ? (
+                <>
+                  <p className={`text-2xl font-bold ${unrealizedGL >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}>
+                    {unrealizedGL >= 0 ? "+" : ""}${fmt(Math.abs(unrealizedGL))}
+                  </p>
+                  <p className={`text-xs mt-1 font-medium ${unrealizedGL >= 0 ? "text-emerald-500" : "text-red-500"}`}>
+                    {unrealizedGLPct >= 0 ? "+" : ""}{unrealizedGLPct.toFixed(2)}% vs cost basis
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-2xl font-bold text-zinc-900 dark:text-zinc-50">—</p>
+                  <p className="text-xs text-zinc-400 mt-1">Enter unit costs to calculate</p>
+                </>
+              )}
             </div>
             <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-black px-6 py-5">
               <p className="text-xs font-semibold tracking-widest text-indigo-500 dark:text-indigo-400 uppercase mb-1">
@@ -192,8 +269,9 @@ export default function WatchlistPage() {
               <thead>
                 <tr className="border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900">
                   <th className="px-6 py-3 text-left font-semibold text-zinc-700 dark:text-zinc-300">Ticker</th>
-                  <th className="px-6 py-3 text-right font-semibold text-zinc-500">Price Added</th>
+                  <th className="px-6 py-3 text-right font-semibold text-zinc-500">Unit Cost</th>
                   <th className="px-6 py-3 text-right font-semibold text-zinc-500">Quantity</th>
+                  <th className="px-6 py-3 text-right font-semibold text-zinc-500">Cost Basis</th>
                   <th className="px-6 py-3 text-right font-semibold text-zinc-500">Market Value</th>
                   <th className="px-6 py-3 text-left font-semibold text-zinc-500">Date Added</th>
                   <th className="px-6 py-3" />
@@ -203,7 +281,9 @@ export default function WatchlistPage() {
                 {items.map((item) => {
                   const price = parseFloat(item.price) || 0;
                   const qty = parseInt(item.quantity) || 0;
+                  const cost = parseFloat(item.unit_cost) || 0;
                   const value = price * qty;
+                  const costBasis = cost * qty;
                   return (
                     <tr
                       key={item.ticker}
@@ -217,15 +297,20 @@ export default function WatchlistPage() {
                           {item.ticker}
                         </Link>
                       </td>
-                      <td className="px-6 py-4 text-right text-zinc-500">
-                        {item.price ? `$${item.price}` : "—"}
+                      <td className="px-6 py-4 text-right">
+                        <div className="flex justify-end">
+                          <UnitCostCell item={item} onUpdate={handleFieldUpdate} />
+                        </div>
                       </td>
                       <td className="px-6 py-4 text-right">
                         <div className="flex justify-end">
-                          <QuantityCell item={item} onUpdate={handleQuantityUpdate} />
+                          <QuantityCell item={item} onUpdate={handleFieldUpdate} />
                         </div>
                       </td>
-                      <td className="px-6 py-4 text-right font-medium text-zinc-800 dark:text-zinc-200">
+                      <td className="px-6 py-4 text-right text-zinc-500 tabular-nums text-sm">
+                        {costBasis > 0 ? `$${fmt(costBasis)}` : "—"}
+                      </td>
+                      <td className="px-6 py-4 text-right font-medium text-zinc-800 dark:text-zinc-200 tabular-nums">
                         {value > 0 ? `$${fmt(value)}` : "—"}
                       </td>
                       <td className="px-6 py-4 text-zinc-400 text-xs">
@@ -253,7 +338,10 @@ export default function WatchlistPage() {
                     <td colSpan={3} className="px-6 py-3 text-sm font-semibold text-zinc-700 dark:text-zinc-300">
                       Total
                     </td>
-                    <td className="px-6 py-3 text-right text-sm font-bold text-zinc-900 dark:text-zinc-50">
+                    <td className="px-6 py-3 text-right text-sm font-semibold text-zinc-600 dark:text-zinc-400 tabular-nums">
+                      {totalCostBasis > 0 ? `$${fmt(totalCostBasis)}` : "—"}
+                    </td>
+                    <td className="px-6 py-3 text-right text-sm font-bold text-zinc-900 dark:text-zinc-50 tabular-nums">
                       ${fmt(totalValue)}
                     </td>
                     <td colSpan={2} />

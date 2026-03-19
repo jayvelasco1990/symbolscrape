@@ -66,6 +66,7 @@ function SpyRow({ spy }) {
       <td className="px-4 py-3 text-right text-xs text-zinc-400" />
       <td className="px-4 py-3 text-right text-xs text-zinc-400" />
       <td className="px-4 py-3 text-right text-xs text-zinc-400" />
+      <td className="px-3 py-3" />
       {PERIODS.map(({ key }) => (
         <td key={key} className="px-3 py-3">
           <PerfCell value={spy?.[key] ?? null} spy={null} showDelta={false} />
@@ -195,13 +196,14 @@ export default function BreakdownPage() {
                     <SortTh label="Weight" sortK="weight" className="text-right" />
                     <th className="px-4 py-3 text-right text-xs font-semibold text-zinc-500 whitespace-nowrap">Value</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-zinc-500 whitespace-nowrap">Qty</th>
+                    <th className="px-3 py-3 text-center text-xs font-semibold text-zinc-500 whitespace-nowrap">Since Purchase</th>
                     {PERIODS.map((p) => (
                       <SortTh key={p.key} label={p.label} sortK={p.key} />
                     ))}
                   </tr>
                   {showDelta && (
                     <tr className="border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50">
-                      <td colSpan={4} className="px-4 py-1.5 text-xs text-zinc-400 sticky left-0 bg-zinc-50/80 dark:bg-zinc-900/50">
+                      <td colSpan={5} className="px-4 py-1.5 text-xs text-zinc-400 sticky left-0 bg-zinc-50/80 dark:bg-zinc-900/50">
                         Cell: return · <span className="text-xs">sub-row: vs SPY</span>
                       </td>
                       {PERIODS.map((p) => (
@@ -241,6 +243,13 @@ export default function BreakdownPage() {
                       </td>
                       <td className="px-4 py-3 text-right text-xs text-zinc-400 tabular-nums">
                         {row.quantity || "—"}
+                      </td>
+                      <td className="px-3 py-2">
+                        {row.unitReturn != null ? (
+                          <PerfCell value={row.unitReturn} spy={null} showDelta={false} />
+                        ) : (
+                          <span className="block text-center text-zinc-300 dark:text-zinc-600 text-xs">—</span>
+                        )}
                       </td>
                       {PERIODS.map(({ key }) => (
                         <td key={key} className="px-3 py-2">
