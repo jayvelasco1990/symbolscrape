@@ -14,9 +14,9 @@ type PerfMap = Partial<Record<PerfKey, number | null>>;
 
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
 
-async function scrapePerf(ticker: string): Promise<PerfMap> {
+async function scrapePerf(ticker: string): Promise<{ perf: PerfMap; currentPrice: number | null }> {
   const res = await fetch(`https://finviz.com/quote.ashx?t=${ticker}`, { headers: HEADERS });
-  if (!res.ok) return {};
+  if (!res.ok) return { perf: {}, currentPrice: null };
 
   const $ = cheerio.load(await res.text());
   const stats: Record<string, string> = {};
@@ -30,20 +30,24 @@ async function scrapePerf(ticker: string): Promise<PerfMap> {
     }
   });
 
-  const result: PerfMap = {};
+  const perf: PerfMap = {};
   for (const k of PERF_KEYS) {
     const n = parseFloat((stats[k] ?? "").replace("%", ""));
-    result[k] = isNaN(n) ? null : n;
+    perf[k] = isNaN(n) ? null : n;
   }
-  return result;
+
+  const rawPrice = parseFloat((stats["Price"] ?? "").replace(/[^0-9.]/g, ""));
+  const currentPrice = isNaN(rawPrice) ? null : rawPrice;
+
+  return { perf, currentPrice };
 }
 
 export async function GET() {
   const db = getDb();
 
   const watchlist = db
-    .prepare("SELECT ticker, price, quantity FROM watchlist")
-    .all() as { ticker: string; price: string; quantity: number }[];
+    .prepare("SELECT ticker, price, quantity, unit_cost FROM watchlist")
+    .all() as { ticker: string; price: string; quantity: number; unit_cost: number | null }[];
 
   if (watchlist.length === 0) {
     return NextResponse.json({ portfolio: null, spy: null, fetchedAt: null });
@@ -52,6 +56,7 @@ export async function GET() {
   const tickers = [...new Set([...watchlist.map((w) => w.ticker), "SPY"])];
   const now = Date.now();
   const perfMap: Record<string, PerfMap> = {};
+  const priceMap: Record<string, number | null> = {};
 
   const getCache = db.prepare("SELECT data, fetched_at FROM perf_cache WHERE ticker = ?");
   const upsertCache = db.prepare(`
@@ -65,11 +70,15 @@ export async function GET() {
       const age = row ? now - new Date(row.fetched_at + " UTC").getTime() : Infinity;
 
       if (row && age < CACHE_TTL_MS) {
-        perfMap[ticker] = JSON.parse(row.data);
+        const cached = JSON.parse(row.data);
+        const { __price = null, ...perfData } = cached;
+        perfMap[ticker] = perfData as PerfMap;
+        priceMap[ticker] = __price;
       } else {
-        const perf = await scrapePerf(ticker);
+        const { perf, currentPrice } = await scrapePerf(ticker);
         perfMap[ticker] = perf;
-        upsertCache.run(ticker, JSON.stringify(perf));
+        priceMap[ticker] = currentPrice;
+        upsertCache.run(ticker, JSON.stringify({ ...perf, __price: currentPrice }));
       }
     })
   );
@@ -102,16 +111,24 @@ export async function GET() {
     }
   }
 
-  // Per-ticker breakdown with weight
+  // Per-ticker breakdown with weight and unit return
   const breakdown = watchlist.map((w) => {
     const value = (parseFloat(w.price) || 0) * (w.quantity || 0);
     const weight = totalValue > 0 ? (value / totalValue) * 100 : null;
+    const currentPrice = priceMap[w.ticker] ?? null;
+    const unitReturn =
+      w.unit_cost && w.unit_cost > 0 && currentPrice
+        ? parseFloat(((currentPrice - w.unit_cost) / w.unit_cost * 100).toFixed(2))
+        : null;
     return {
       ticker: w.ticker,
       price: w.price,
       quantity: w.quantity,
+      unit_cost: w.unit_cost,
+      currentPrice,
       value,
       weight,
+      unitReturn,
       perf: perfMap[w.ticker] ?? {},
     };
   });
