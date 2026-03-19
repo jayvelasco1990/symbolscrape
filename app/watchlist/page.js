@@ -6,6 +6,7 @@ import dynamic from "next/dynamic";
 
 const PerformanceChart = dynamic(() => import("@/app/components/PerformanceChart"), { ssr: false });
 const DiversificationScore = dynamic(() => import("@/app/components/DiversificationScore"), { ssr: false });
+const ValuationChart = dynamic(() => import("@/app/components/ValuationChart"), { ssr: false });
 
 function fmt(n) {
   return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -82,6 +83,8 @@ export default function WatchlistPage() {
   const [loading, setLoading] = useState(true);
   const [perf, setPerf] = useState(null);
   const [perfLoading, setPerfLoading] = useState(false);
+  const [valuation, setValuation] = useState(null);
+  const [valuationLoading, setValuationLoading] = useState(false);
 
   async function load() {
     const res = await fetch("/api/watchlist");
@@ -94,6 +97,12 @@ export default function WatchlistPage() {
         .then((r) => r.json())
         .then(setPerf)
         .finally(() => setPerfLoading(false));
+
+      setValuationLoading(true);
+      fetch("/api/watchlist/valuation")
+        .then((r) => r.json())
+        .then(setValuation)
+        .finally(() => setValuationLoading(false));
     }
   }
 
@@ -218,6 +227,33 @@ export default function WatchlistPage() {
 
         {/* Diversification Score */}
         {!loading && items.length > 0 && <DiversificationScore items={items} />}
+
+        {/* Portfolio Valuation */}
+        {!loading && items.length > 0 && (
+          <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-black px-6 py-5">
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-xs font-semibold tracking-widest text-indigo-500 dark:text-indigo-400 uppercase">
+                Portfolio Valuation
+              </p>
+              {valuation?.fetchedAt && (
+                <span className="text-xs text-zinc-400">
+                  Cached · {new Date(valuation.fetchedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                </span>
+              )}
+            </div>
+            {valuationLoading && !valuation ? (
+              <p className="text-sm text-zinc-400 animate-pulse py-8 text-center">Calculating intrinsic values…</p>
+            ) : valuation?.items?.length > 0 ? (
+              <ValuationChart
+                items={valuation.items}
+                tenYear={valuation.tenYear}
+                avgMarginOfSafety={valuation.avgMarginOfSafety}
+              />
+            ) : (
+              <p className="text-sm text-zinc-400 py-4 text-center">No valuation data available.</p>
+            )}
+          </div>
+        )}
 
         {/* Performance vs SPY */}
         {!loading && items.length > 0 && (
