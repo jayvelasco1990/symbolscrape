@@ -14,6 +14,25 @@ type PerfMap = Partial<Record<PerfKey, number | null>>;
 
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
 
+async function fetchSpyAtDate(dateStr: string): Promise<number | null> {
+  try {
+    const d = new Date(dateStr.replace(" ", "T") + "Z");
+    const period1 = Math.floor(d.getTime() / 1000) - 86400;
+    const period2 = Math.floor(d.getTime() / 1000) + 7 * 86400;
+    const res = await fetch(
+      `https://query1.finance.yahoo.com/v8/finance/chart/SPY?interval=1d&period1=${period1}&period2=${period2}`,
+      { headers: { "User-Agent": HEADERS["User-Agent"] } }
+    );
+    if (!res.ok) return null;
+    const json = await res.json();
+    const closes: number[] = json?.chart?.result?.[0]?.indicators?.quote?.[0]?.close ?? [];
+    const first = closes.filter(Boolean)[0];
+    return first ? parseFloat(first.toFixed(2)) : null;
+  } catch {
+    return null;
+  }
+}
+
 async function scrapePerf(ticker: string): Promise<{ perf: PerfMap; currentPrice: number | null }> {
   const res = await fetch(`https://finviz.com/quote.ashx?t=${ticker}`, { headers: HEADERS });
   if (!res.ok) return { perf: {}, currentPrice: null };
@@ -133,6 +152,58 @@ export async function GET() {
     };
   });
 
+  // Since inception — uses MIN(added_at) as fund start date
+  const inceptionRow = db
+    .prepare("SELECT MIN(added_at) as inception FROM watchlist")
+    .get() as { inception: string | null } | undefined;
+  const inceptionDate = inceptionRow?.inception ?? null;
+
+  let sinceInception = null;
+  if (inceptionDate) {
+    const spyAtInception = await fetchSpyAtDate(inceptionDate);
+    const spyCurrentPrice = priceMap["SPY"] ?? null;
+
+    // Portfolio current value using live prices (fall back to stored price)
+    const portfolioCurrentValue = watchlist.reduce((sum, w) => {
+      const cp = priceMap[w.ticker] ?? (parseFloat(w.price) || 0);
+      return sum + cp * (w.quantity || 0);
+    }, 0);
+
+    // Cost basis: prefer unit_cost, fall back to stored price at time of adding
+    const portfolioCostBasis = watchlist.reduce((sum, w) => {
+      const cost = w.unit_cost && w.unit_cost > 0 ? w.unit_cost : (parseFloat(w.price) || 0);
+      return sum + cost * (w.quantity || 0);
+    }, 0);
+
+    const portfolioReturn =
+      portfolioCostBasis > 0
+        ? parseFloat(((portfolioCurrentValue - portfolioCostBasis) / portfolioCostBasis * 100).toFixed(2))
+        : null;
+
+    const spyReturn =
+      spyAtInception && spyCurrentPrice
+        ? parseFloat(((spyCurrentPrice - spyAtInception) / spyAtInception * 100).toFixed(2))
+        : null;
+
+    const alpha =
+      portfolioReturn !== null && spyReturn !== null
+        ? parseFloat((portfolioReturn - spyReturn).toFixed(2))
+        : null;
+
+    const daysElapsed = Math.floor(
+      (Date.now() - new Date(inceptionDate.replace(" ", "T") + "Z").getTime()) / (1000 * 60 * 60 * 24)
+    );
+
+    sinceInception = {
+      portfolioReturn,
+      spyReturn,
+      alpha,
+      inceptionDate,
+      daysElapsed,
+      hasUnitCosts: watchlist.some((w) => w.unit_cost && w.unit_cost > 0),
+    };
+  }
+
   const fetchedAt = new Date().toISOString();
-  return NextResponse.json({ portfolio, spy: perfMap["SPY"] ?? {}, breakdown, fetchedAt });
+  return NextResponse.json({ portfolio, spy: perfMap["SPY"] ?? {}, breakdown, sinceInception, fetchedAt });
 }
