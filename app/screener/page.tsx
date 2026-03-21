@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import StocksTable from "../components/StocksTable";
 
@@ -9,7 +10,7 @@ const TABS = [
   { key: "smallcap", label: "Small Cap", description: "Market cap $300M–$2B · USA · Low beta" },
 ];
 
-export default function ScreenerPage() {
+function ScreenerContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const activeTab = searchParams.get("tab") ?? "megacap";
@@ -102,5 +103,13 @@ export default function ScreenerPage() {
         />
       </div>
     </div>
+  );
+}
+
+export default function ScreenerPage() {
+  return (
+    <Suspense>
+      <ScreenerContent />
+    </Suspense>
   );
 }

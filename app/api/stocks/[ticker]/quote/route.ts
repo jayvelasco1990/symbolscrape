@@ -60,7 +60,7 @@ function parseTables($: ReturnType<typeof cheerio.load>) {
     $(table).find("tr").each((i, row) => {
       const cells = $(row).find("th, td");
       if (i === 0) {
-        cells.each((_, c) => headers.push($(c).text().trim()));
+        cells.each((_, c) => { headers.push($(c).text().trim()); });
       } else {
         const entry: Record<string, string> = {};
         cells.each((j, c) => { entry[headers[j] ?? `col_${j}`] = $(c).text().trim(); });

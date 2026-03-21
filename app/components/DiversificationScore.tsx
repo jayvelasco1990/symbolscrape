@@ -41,7 +41,7 @@ function calcDiversification(items: Item[]) {
     .map((w, i) => ({ ticker: items[i].ticker, weight: w }))
     .sort((a, b) => b.weight - a.weight);
 
-  const top1Pct = sorted[0]?.weight * 100 ?? 0;
+  const top1Pct = (sorted[0]?.weight ?? 0) * 100;
   const top3Pct = sorted.slice(0, 3).reduce((s, x) => s + x.weight * 100, 0);
   const isEqualWeighted = totalValue === 0;
 
