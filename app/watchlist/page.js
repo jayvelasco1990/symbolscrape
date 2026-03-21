@@ -157,12 +157,25 @@ export default function WatchlistPage() {
               {items.length} {items.length === 1 ? "stock" : "stocks"} tracked
             </p>
             {items.length > 0 && (
-              <Link
-                href="/watchlist/performance"
-                className="text-sm font-medium text-indigo-500 hover:text-indigo-600 dark:text-indigo-400 dark:hover:text-indigo-300 transition-colors"
-              >
-                View breakdown →
-              </Link>
+              <div className="flex items-center gap-4">
+                <a
+                  href="/watchlist/factsheet"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 text-sm font-medium text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100 transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 16v-8m0 8l-3-3m3 3l3-3M4 16h16M4 8h16" />
+                  </svg>
+                  Factsheet
+                </a>
+                <Link
+                  href="/watchlist/performance"
+                  className="text-sm font-medium text-indigo-500 hover:text-indigo-600 dark:text-indigo-400 dark:hover:text-indigo-300 transition-colors"
+                >
+                  View breakdown →
+                </Link>
+              </div>
             )}
           </div>
         </div>

@@ -4,7 +4,7 @@ import ClearCacheButton from "./ClearCacheButton";
 
 export default function NavBar() {
   return (
-    <nav className="w-full border-b border-zinc-200 dark:border-zinc-800 bg-white/90 dark:bg-black/90 backdrop-blur-sm px-6 py-3 flex items-center justify-between sticky top-0 z-50">
+    <nav className="print:hidden w-full border-b border-zinc-200 dark:border-zinc-800 bg-white/90 dark:bg-black/90 backdrop-blur-sm px-6 py-3 flex items-center justify-between sticky top-0 z-50">
       <div className="flex items-center gap-6">
         <Link href="/" className="text-sm font-bold tracking-tight text-indigo-600 dark:text-indigo-400">
           vpfund
