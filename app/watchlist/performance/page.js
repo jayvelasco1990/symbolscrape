@@ -53,6 +53,96 @@ function PerfCell({ value, spy, showDelta = false }) {
   );
 }
 
+function SinceInceptionCard({ sinceInception }) {
+  if (!sinceInception) return null;
+  const { portfolioReturn, spyReturn, alpha, inceptionDate, daysElapsed, hasUnitCosts } = sinceInception;
+
+  const outperforming = alpha !== null && alpha > 0;
+  const inceptionLabel = new Date(inceptionDate.replace(" ", "T") + "Z").toLocaleDateString("en-US", {
+    month: "short", day: "numeric", year: "numeric",
+  });
+
+  return (
+    <div className="rounded-xl border-2 border-indigo-200 dark:border-indigo-800 bg-white dark:bg-black px-6 py-5">
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <p className="text-xs font-semibold tracking-widest text-indigo-500 dark:text-indigo-400 uppercase">
+            Since Inception
+          </p>
+          <p className="text-xs text-zinc-400 mt-0.5">
+            Fund started {inceptionLabel} · {daysElapsed} day{daysElapsed !== 1 ? "s" : ""} ago
+          </p>
+        </div>
+        {alpha !== null && (
+          <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold ${
+            outperforming
+              ? "bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300"
+              : "bg-red-100 dark:bg-red-950 text-red-600 dark:text-red-400"
+          }`}>
+            <span>{outperforming ? "▲" : "▼"}</span>
+            <span>{outperforming ? "Outperforming" : "Underperforming"} SPY</span>
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-cols-3 gap-4">
+        {/* Fund return */}
+        <div className="rounded-lg bg-zinc-50 dark:bg-zinc-900 px-4 py-3">
+          <p className="text-xs text-zinc-400 mb-1">Your Fund</p>
+          {portfolioReturn !== null ? (
+            <p className={`text-2xl font-bold tabular-nums ${portfolioReturn >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500 dark:text-red-400"}`}>
+              {portfolioReturn >= 0 ? "+" : ""}{portfolioReturn.toFixed(2)}%
+            </p>
+          ) : (
+            <p className="text-2xl font-bold text-zinc-400">—</p>
+          )}
+          <p className="text-xs text-zinc-400 mt-1">
+            {hasUnitCosts ? "vs unit cost" : "vs price at add"}
+          </p>
+        </div>
+
+        {/* SPY return */}
+        <div className="rounded-lg bg-zinc-50 dark:bg-zinc-900 px-4 py-3">
+          <p className="text-xs text-zinc-400 mb-1">SPY</p>
+          {spyReturn !== null ? (
+            <p className={`text-2xl font-bold tabular-nums ${spyReturn >= 0 ? "text-amber-600 dark:text-amber-400" : "text-red-500 dark:text-red-400"}`}>
+              {spyReturn >= 0 ? "+" : ""}{spyReturn.toFixed(2)}%
+            </p>
+          ) : (
+            <p className="text-2xl font-bold text-zinc-400">—</p>
+          )}
+          <p className="text-xs text-zinc-400 mt-1">since {inceptionLabel}</p>
+        </div>
+
+        {/* Alpha */}
+        <div className={`rounded-lg px-4 py-3 ${
+          alpha === null
+            ? "bg-zinc-50 dark:bg-zinc-900"
+            : outperforming
+            ? "bg-emerald-50 dark:bg-emerald-950/40"
+            : "bg-red-50 dark:bg-red-950/40"
+        }`}>
+          <p className="text-xs text-zinc-400 mb-1">Alpha</p>
+          {alpha !== null ? (
+            <p className={`text-2xl font-bold tabular-nums ${outperforming ? "text-emerald-600 dark:text-emerald-400" : "text-red-500 dark:text-red-400"}`}>
+              {alpha >= 0 ? "+" : ""}{alpha.toFixed(2)}%
+            </p>
+          ) : (
+            <p className="text-2xl font-bold text-zinc-400">—</p>
+          )}
+          <p className="text-xs text-zinc-400 mt-1">fund minus SPY</p>
+        </div>
+      </div>
+
+      {!hasUnitCosts && (
+        <p className="text-xs text-zinc-400 mt-3">
+          Set unit costs on the watchlist page for exact purchase-price accuracy
+        </p>
+      )}
+    </div>
+  );
+}
+
 function SpyRow({ spy }) {
   return (
     <tr className="border-t-2 border-amber-200 dark:border-amber-900 bg-amber-50/50 dark:bg-amber-950/20">
@@ -143,6 +233,11 @@ export default function BreakdownPage() {
       </div>
 
       <div className="max-w-7xl mx-auto px-6 py-6 flex flex-col gap-6">
+
+        {/* Since Inception */}
+        {!loading && data?.sinceInception && (
+          <SinceInceptionCard sinceInception={data.sinceInception} />
+        )}
 
         {/* Portfolio vs SPY chart */}
         {!loading && data?.portfolio && (
