@@ -1,0 +1,50 @@
+appId: com.vpfund.app
+productName: vpfund
+copyright: Copyright © 2025
+
+directories:
+  output: dist
+  buildResources: build
+
+# Files included in the Electron app itself (not the Next.js server)
+files:
+  - electron/main.js
+  - package.json
+
+# The Next.js standalone server is bundled as a resource
+extraResources:
+  - from: electron-server
+    to: server
+    filter:
+      - "**/*"
+
+# ── macOS ──────────────────────────────────────────────────────────────────────
+mac:
+  target:
+    - target: zip
+      arch:
+        - x64
+        - arm64
+  category: public.app-category.finance
+  # icon: build/icon.icns   # add a 1024x1024 .icns file to build/ to use a custom icon
+
+# ── Windows ────────────────────────────────────────────────────────────────────
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  # icon: build/icon.ico   # add a 256x256 .ico file to build/ to use a custom icon
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: vpfund
+
+# ── Linux ──────────────────────────────────────────────────────────────────────
+linux:
+  target: AppImage
+  category: Finance

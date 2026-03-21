@@ -2,6 +2,9 @@
   "name": "vpfund",
   "version": "0.1.0",
   "private": true,
+  "main": "electron/main.js",
+  "description": "Personal value investing portfolio tracker",
+  "author": "Jay Velasco",
   "engines": {
     "node": ">=22"
   },
@@ -9,7 +12,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "electron:dev": "electron .",
+    "electron:build": "node scripts/build-electron.mjs",
+    "electron:pack": "electron-builder --dir"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
@@ -22,11 +28,14 @@
     "recharts": "^3.8.0"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.0.3",
     "@tailwindcss/postcss": "^4",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "electron": "^33.4.11",
+    "electron-builder": "^26.8.1",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "puppeteer": "^24.39.1",
