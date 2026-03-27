@@ -41,6 +41,28 @@ function parseNum(s: string | undefined): number {
   return parseFloat(s.replace(/[^0-9.-]/g, "")) || 0;
 }
 
+function parseNumN(s: string | undefined): number | null {
+  if (!s || s === "-") return null;
+  const n = parseFloat(s.replace(/[^0-9.-]/g, ""));
+  return isNaN(n) ? null : n;
+}
+
+const SECTOR_TO_ETF: Record<string, string> = {
+  "Technology":             "XLK",
+  "Financial":              "XLF",
+  "Financial Services":     "XLF",
+  "Healthcare":             "XLV",
+  "Health Care":            "XLV",
+  "Energy":                 "XLE",
+  "Utilities":              "XLU",
+  "Industrials":            "XLI",
+  "Consumer Defensive":     "XLP",
+  "Consumer Cyclical":      "XLY",
+  "Basic Materials":        "XLB",
+  "Real Estate":            "XLRE",
+  "Communication Services": "XLC",
+};
+
 type SignalLabel = "Strong Buy" | "Buy" | "Neutral" | "Avoid" | "No Data";
 
 function computeSignal(
@@ -95,6 +117,7 @@ export async function GET(request: NextRequest) {
     .join(",");
 
   const baseQuery = `f=${filters}${cfg.extra ?? ""}&r=${r}`;
+  const db = getDb();
 
   // Always fetch overview (display) and financial (dividend) in parallel
   const [res111, res161display] = await Promise.all([
@@ -122,10 +145,88 @@ export async function GET(request: NextRequest) {
       if (row["Ticker"]) row["_dividend"] = divMap[row["Ticker"]] ?? "";
     }
   }
+  // Load RS perf from cache; only fetch Yahoo Finance for stale/missing tickers
+  const RS_TTL_MS = 6 * 60 * 60 * 1000;
+  const tickersForPerf = rows111.map((r) => r["Ticker"]).filter(Boolean);
+  const perfByTicker: Record<string, { ytd: number | null; month: number | null }> = {};
+  const needsRsFetch: string[] = [];
+
+  for (const ticker of tickersForPerf) {
+    const cached = db
+      .prepare("SELECT ytd, month, fetched_at FROM rs_cache WHERE ticker = ?")
+      .get(ticker) as { ytd: number | null; month: number | null; fetched_at: string } | undefined;
+    if (cached && Date.now() - new Date(cached.fetched_at + "Z").getTime() < RS_TTL_MS) {
+      perfByTicker[ticker] = { ytd: cached.ytd, month: cached.month };
+    } else {
+      needsRsFetch.push(ticker);
+    }
+  }
+
+  if (needsRsFetch.length > 0) {
+    const fetched = await Promise.all(
+      needsRsFetch.map(async (ticker) => {
+        try {
+          const res = await fetch(
+            `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=ytd&includePrePost=false`,
+            { headers: { "User-Agent": HEADERS["User-Agent"] } }
+          );
+          if (!res.ok) return null;
+          const json = await res.json();
+          const closes: (number | null)[] = json?.chart?.result?.[0]?.indicators?.quote?.[0]?.close ?? [];
+          const valid = closes.filter((c): c is number => c != null);
+          if (valid.length < 2) return null;
+          const last = valid[valid.length - 1];
+          return {
+            ytd:   parseFloat(((last / valid[0] - 1) * 100).toFixed(2)),
+            month: parseFloat(((last / valid[Math.max(0, valid.length - 22)] - 1) * 100).toFixed(2)),
+          };
+        } catch { return null; }
+      })
+    );
+
+    const fetched_at = new Date().toISOString().replace("T", " ").split(".")[0];
+    const upsertRS = db.prepare(
+      `INSERT INTO rs_cache (ticker, ytd, month, fetched_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT(ticker) DO UPDATE SET ytd = excluded.ytd, month = excluded.month, fetched_at = excluded.fetched_at`
+    );
+    needsRsFetch.forEach((ticker, i) => {
+      const result = fetched[i];
+      perfByTicker[ticker] = result ?? { ytd: null, month: null };
+      upsertRS.run(ticker, result?.ytd ?? null, result?.month ?? null, fetched_at);
+    });
+  }
+
+  // Load sector ETF YTD + 1M from macro cache for RS baseline
+  const sectorYTD: Record<string, number> = {};
+  const sectorMo:  Record<string, number> = {};
+  try {
+    const macroCached = db.prepare("SELECT data FROM macro_cache WHERE id = 1").get() as { data: string } | undefined;
+    if (macroCached) {
+      const macroData = JSON.parse(macroCached.data);
+      for (const s of macroData.sectors ?? []) {
+        if (s.symbol && s.perfYTD   != null) sectorYTD[s.symbol] = s.perfYTD;
+        if (s.symbol && s.perfMonth != null) sectorMo[s.symbol]  = s.perfMonth;
+      }
+    }
+  } catch { /* macro cache unavailable — RS will show as blank */ }
+
+  function computeRS(ticker: string, sector: string): string {
+    const perf = perfByTicker[ticker];
+    if (!perf || perf.ytd == null) return "";
+    const etf = SECTOR_TO_ETF[sector];
+    if (!etf || sectorYTD[etf] == null) return "";
+    const rsYTD = perf.ytd - sectorYTD[etf];
+    let trend = "";
+    if (perf.month != null && sectorMo[etf] != null) {
+      const rsMo = perf.month - sectorMo[etf];
+      trend = rsMo > rsYTD + 1 ? "↑" : rsMo < rsYTD - 1 ? "↓" : "→";
+    }
+    return `${rsYTD.toFixed(1)}|${trend}`;
+  }
+
   const tickers = rows111.map((r) => r["Ticker"]).filter(Boolean);
 
   // Load cached signals from SQLite
-  const db = getDb();
   const now = Date.now();
   const signalByTicker: Record<string, SignalLabel> = {};
   const needsCompute: string[] = [];
@@ -185,9 +286,10 @@ export async function GET(request: NextRequest) {
 
   const DROP = new Set(["No.", "Volume", "Industry", "Country", "Change"]);
 
-  // Build final output: drop noise columns, inject "Signal" at front, "Dividend" after Price
+  // Build final output: drop noise columns, inject "Signal" + "RS" at front, "Dividend" after Price
   const displayHeaders = [
     "Signal",
+    "RS",
     ...headers111
       .filter((h) => !DROP.has(h))
       .flatMap((h) => (h === "Price" ? ["Price", "Dividend"] : [h])),
@@ -201,6 +303,7 @@ export async function GET(request: NextRequest) {
     }
     return {
       Signal: signalByTicker[ticker] ?? "No Data",
+      RS: computeRS(ticker, row["Sector"] ?? ""),
       ...cleaned,
       Dividend: row["_dividend"] ?? "",
     };

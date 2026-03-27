@@ -1,11 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
+
+interface RevenueQuarter {
+  label: string;
+  revenue: number;
+  revenueFormatted?: string;
+  growthPct: number | null;
+}
 import IntrinsicValue from "./IntrinsicValue";
 import DebtMetrics from "./DebtMetrics";
 import DividendMetrics from "./DividendMetrics";
 import DisruptionRisk from "./DisruptionRisk";
 import BusinessQuality from "./BusinessQuality";
+import GrowthMetrics from "./GrowthMetrics";
 
 type TableRow = Record<string, string>;
 
@@ -20,6 +28,7 @@ interface QuoteData {
     cashFlow: TableRow[];
   };
   intrinsicValue?: { fairValue: string; formula?: string; note?: string };
+  netCashPerShare?: string;
   debtToRevenue?: string;
   debtToEbitda?: string;
   dividendMetrics?: {
@@ -48,6 +57,13 @@ interface QuoteData {
   rateSensitivity?: {
     score: number; level: "Low" | "Moderate" | "High" | "Severe"; rationale: string;
   };
+  growthMetrics?: {
+    revenueGrowthPct: string;
+    grossMarginPct: string;
+    fcfMarginPct: string;
+    rule40: string;
+    evToRevenue: string;
+  } | null;
 }
 
 // Format a raw number string for display: 37154298 → 37,154,298
@@ -163,6 +179,7 @@ export default function StockDetail({
   const [data, setData] = useState<QuoteData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [revenueHistory, setRevenueHistory] = useState<RevenueQuarter[] | null>(null);
 
   useEffect(() => {
     fetch(`/api/stocks/${ticker}/quote`)
@@ -174,6 +191,13 @@ export default function StockDetail({
       })
       .catch(() => setError("Failed to load stock data."))
       .finally(() => setLoading(false));
+
+    fetch(`/api/stocks/${ticker}/revenue`)
+      .then((r) => r.json())
+      .then((d: { quarters: RevenueQuarter[] }) => {
+        if (d.quarters?.length) setRevenueHistory(d.quarters);
+      })
+      .catch(() => {});
   }, [ticker]);
 
   if (loading)
@@ -202,6 +226,7 @@ export default function StockDetail({
             fairValue={iv.fairValue}
             formula={iv.formula}
             note={iv.note}
+            netCashPerShare={data.netCashPerShare}
           />
         </>
       )}
@@ -212,6 +237,23 @@ export default function StockDetail({
       )}
       <DebtMetrics debtToRevenue={data.debtToRevenue} debtToEbitda={data.debtToEbitda} />
       {data.dividendMetrics && <DividendMetrics {...data.dividendMetrics} />}
+
+      {/* ── Growth & Profitability ──────────────────── */}
+      {(revenueHistory?.length || (data.growthMetrics && (
+        data.growthMetrics.revenueGrowthPct || data.growthMetrics.grossMarginPct
+      ))) && (
+        <>
+          <SectionLabel>Growth & Profitability</SectionLabel>
+          <GrowthMetrics
+            revenueGrowthPct={data.growthMetrics?.revenueGrowthPct ?? ""}
+            grossMarginPct={data.growthMetrics?.grossMarginPct ?? ""}
+            fcfMarginPct={data.growthMetrics?.fcfMarginPct ?? ""}
+            rule40={data.growthMetrics?.rule40 ?? ""}
+            evToRevenue={data.growthMetrics?.evToRevenue ?? ""}
+            revenueHistory={revenueHistory}
+          />
+        </>
+      )}
 
       {/* ── Business Quality ────────────────────────── */}
       {data.moatQuality && data.insiderActivity && (

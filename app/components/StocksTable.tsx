@@ -80,6 +80,27 @@ export default function StocksTable({ screener, page, dividend, rsi, onPageChang
         );
       }
 
+      if (h === "RS") {
+        if (!value) return <span className="text-zinc-300 dark:text-zinc-600 text-[10px]">—</span>;
+        const [numStr, trend] = value.split("|");
+        const num = parseFloat(numStr);
+        const color =
+          num >  2 ? "text-emerald-600 dark:text-emerald-400" :
+          num >  0 ? "text-emerald-500 dark:text-emerald-500" :
+          num < -2 ? "text-red-500" : "text-red-400";
+        const trendColor =
+          trend === "↑" ? "text-emerald-500 dark:text-emerald-400" :
+          trend === "↓" ? "text-red-400" : "text-zinc-400";
+        return (
+          <span className="flex items-center gap-0.5 whitespace-nowrap" title="Relative Strength vs sector ETF (YTD). Arrow shows if RS is accelerating (↑) or fading (↓) vs 1M.">
+            <span className={`font-semibold text-[11px] ${color}`}>
+              {num > 0 ? "+" : ""}{numStr}%
+            </span>
+            {trend && <span className={`text-[10px] ${trendColor}`}>{trend}</span>}
+          </span>
+        );
+      }
+
       if (h === "Ticker") {
         const price = info.row.original["Price"] ?? "";
         const back = encodeURIComponent(`/screener?tab=${screener}&page=${page}&dividend=${dividend}&rsi=${rsi}`);

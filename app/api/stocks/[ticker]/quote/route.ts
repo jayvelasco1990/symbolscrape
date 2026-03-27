@@ -60,7 +60,7 @@ function parseTables($: ReturnType<typeof cheerio.load>) {
     $(table).find("tr").each((i, row) => {
       const cells = $(row).find("th, td");
       if (i === 0) {
-        cells.each((_, c) => headers.push($(c).text().trim()));
+        cells.each((_, c) => { headers.push($(c).text().trim()); });
       } else {
         const entry: Record<string, string> = {};
         cells.each((j, c) => { entry[headers[j] ?? `col_${j}`] = $(c).text().trim(); });
@@ -198,26 +198,70 @@ function parseFormatted(s: string): number {
   return n;
 }
 
+// Net Cash per Share = Cash/sh - (Debt/Eq × Book/sh)
+// If price < Net Cash/sh, stock trades below its cash value — classic Graham net-net territory
+function calcNetCash(stats: Record<string, string>): string {
+  const parseVal = (s: string) => parseFloat(s.replace(/[^0-9.-]/g, "")) || 0;
+  const cashSh  = parseVal(stats["Cash/sh"]  ?? "");
+  const bookSh  = parseVal(stats["Book/sh"]  ?? "");
+  const debtEq  = parseVal(stats["Debt/Eq"]  ?? "");
+  if (!cashSh && !bookSh) return "";
+  // Debt/Eq = Total Debt / Book Equity → Total Debt per share = Debt/Eq × Book/sh
+  const netCash = cashSh - debtEq * bookSh;
+  return netCash.toFixed(2);
+}
+
 function calcDebtMetrics(stats: Record<string, string>): { debtToRevenue: string; debtToEbitda: string } {
   const parseVal = (s: string) => parseFloat(s.replace(/[^0-9.-]/g, "")) || 0;
-
-  // Derive total debt from Debt/Equity × (Book/sh × Shares Outstanding)
   const debtEq = parseVal(stats["Debt/Eq"] ?? "");
   const bookSh = parseVal(stats["Book/sh"] ?? "");
   const shsOutstand = parseFormatted(stats["Shs Outstand"] ?? "");
   const totalDebt = debtEq * bookSh * shsOutstand;
-
-  // Debt / Revenue  (Finviz key is "Sales")
   const sales = parseFormatted(stats["Sales"] ?? "");
   const debtToRevenue = totalDebt && sales ? (totalDebt / sales).toFixed(2) : "";
-
-  // Debt / EBITDA  (EBITDA = Enterprise Value / EV/EBITDA)
   const ev = parseFormatted(stats["Enterprise Value"] ?? "");
   const evEbitda = parseVal(stats["EV/EBITDA"] ?? "");
   const ebitda = ev && evEbitda ? ev / evEbitda : 0;
   const debtToEbitda = totalDebt && ebitda ? (totalDebt / ebitda).toFixed(2) : "";
-
   return { debtToRevenue, debtToEbitda };
+}
+
+interface GrowthMetrics {
+  revenueGrowthPct: string;
+  grossMarginPct: string;
+  fcfMarginPct: string;
+  rule40: string;
+  evToRevenue: string;
+}
+
+function calcGrowthMetrics(stats: Record<string, string>): GrowthMetrics | null {
+  const parseVal = (s: string) => parseFloat(s.replace(/[^0-9.-]/g, "")) || 0;
+
+  const grossMargin     = parseVal(stats["Gross Margin"] ?? "");
+  const salesQQ         = parseVal(stats["Sales Q/Q"]    ?? ""); // quarterly YoY revenue growth
+  const price           = parseVal(stats["Price"]        ?? "");
+  const pfcf            = parseVal(stats["P/FCF"]        ?? "");
+  const sales           = parseFormatted(stats["Sales"]  ?? "");
+  const shsOutstand     = parseFormatted(stats["Shs Outstand"] ?? "");
+  const ev              = parseFormatted(stats["Enterprise Value"] ?? "");
+
+  if (!grossMargin && !salesQQ) return null;
+
+  // FCF/sh = Price / P/FCF; FCF = FCF/sh × shares; FCF margin = FCF / Sales
+  const fcfSh     = price && pfcf ? price / pfcf : 0;
+  const fcfTotal  = fcfSh && shsOutstand ? fcfSh * shsOutstand : 0;
+  const fcfMargin = fcfTotal && sales ? (fcfTotal / sales) * 100 : 0;
+
+  const evToRev = ev && sales ? ev / sales : 0;
+  const rule40  = salesQQ && fcfMargin ? salesQQ + fcfMargin : 0;
+
+  return {
+    revenueGrowthPct: salesQQ    ? salesQQ.toFixed(1)    : "",
+    grossMarginPct:   grossMargin ? grossMargin.toFixed(1) : "",
+    fcfMarginPct:     fcfMargin  ? fcfMargin.toFixed(1)  : "",
+    rule40:           rule40     ? rule40.toFixed(1)     : "",
+    evToRevenue:      evToRev    ? evToRev.toFixed(1)    : "",
+  };
 }
 
 function calcDividendMetrics(stats: Record<string, string>) {
@@ -273,9 +317,8 @@ function calcDividendMetrics(stats: Record<string, string>) {
 
 function calcMoatQuality(stats: Record<string, string>) {
   const parseVal = (s: string) => parseFloat(s.replace(/[^0-9.-]/g, "")) || 0;
-
-  const roe          = parseVal(stats["ROE"] ?? "");
-  const roic         = parseVal(stats["ROIC"] ?? "");
+  const roe          = parseVal(stats["ROE"]           ?? "");
+  const roic         = parseVal(stats["ROIC"]          ?? "");
   const profitMargin = parseVal(stats["Profit Margin"] ?? "");
 
   let score = 0;
@@ -289,8 +332,7 @@ function calcMoatQuality(stats: Record<string, string>) {
     score >= 1 ? "Narrow"   : "Weak";
 
   return {
-    score,
-    level,
+    score, level,
     roe:          stats["ROE"]           ?? "",
     roic:         stats["ROIC"]          ?? "",
     profitMargin: stats["Profit Margin"] ?? "",
@@ -323,8 +365,8 @@ function calcInsiderActivity(stats: Record<string, string>) {
 
 function calcIntrinsicValue(stats: Record<string, string>) {
   const parseVal = (s: string) => parseFloat(s.replace(/[^0-9.-]/g, "")) || 0;
-  const eps = parseVal(stats["EPS (ttm)"] ?? "");
-  const bookSh = parseVal(stats["Book/sh"] ?? "");
+  const eps    = parseVal(stats["EPS (ttm)"] ?? "");
+  const bookSh = parseVal(stats["Book/sh"]   ?? "");
 
   if (eps <= 0 || bookSh <= 0) {
     return {
@@ -354,10 +396,12 @@ export async function GET(
   ]);
 
   const intrinsicValue  = calcIntrinsicValue(finviz?.stats ?? {});
+  const netCashPerShare = calcNetCash(finviz?.stats ?? {});
   const { debtToRevenue, debtToEbitda } = calcDebtMetrics(finviz?.stats ?? {});
   const dividendMetrics = calcDividendMetrics(finviz?.stats ?? {});
   const moatQuality     = calcMoatQuality(finviz?.stats ?? {});
   const insiderActivity = calcInsiderActivity(finviz?.stats ?? {});
+  const growthMetrics   = calcGrowthMetrics(finviz?.stats ?? {});
   const riskProfile     = computeRiskProfile(finviz?.sector ?? "", finviz?.description || reuters.description);
   const rateSensitivity = computeRateSensitivity(finviz?.sector ?? "");
 
@@ -366,7 +410,7 @@ export async function GET(
     reuters.financials.balanceSheet.length ||
     reuters.financials.cashFlow.length;
 
-  const quality = { moatQuality, insiderActivity, riskProfile, rateSensitivity };
+  const quality = { moatQuality, insiderActivity, riskProfile, rateSensitivity, growthMetrics };
 
   if (hasReutersData) {
     return NextResponse.json({
@@ -374,7 +418,7 @@ export async function GET(
       ...reuters,
       price: finviz?.price || reuters.price,
       description: finviz?.description || reuters.description,
-      intrinsicValue,
+      intrinsicValue, netCashPerShare,
       debtToRevenue, debtToEbitda, dividendMetrics,
       ...quality,
     });
@@ -386,7 +430,7 @@ export async function GET(
       ticker: symbol,
       ...finvizWithoutStats,
       priceChange: "",
-      intrinsicValue,
+      intrinsicValue, netCashPerShare,
       debtToRevenue, debtToEbitda, dividendMetrics,
       ...quality,
     });
@@ -398,7 +442,7 @@ export async function GET(
     priceChange: "",
     description: "",
     financials: { incomeStatement: [], balanceSheet: [], cashFlow: [] },
-    intrinsicValue,
+    intrinsicValue, netCashPerShare: "",
     dividendMetrics: null,
     debtToRevenue: "",
     debtToEbitda: "",
