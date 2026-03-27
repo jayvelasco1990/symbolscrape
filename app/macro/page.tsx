@@ -25,6 +25,15 @@ interface MacroData {
     isInverted: boolean;
   };
   spreads: { ig: number | null; hy: number | null };
+  economics: {
+    cpiYoY: number | null;
+    corePceYoY: number | null;
+    unemployment: number | null;
+  } | null;
+  sentiment: {
+    fearGreedScore: number | null;
+    fearGreedRating: string | null;
+  } | null;
   spy: {
     price: string;
     sma200: number | null;
@@ -322,6 +331,120 @@ export default function MacroPage() {
                 <p className="text-xs text-zinc-400 mt-4 leading-relaxed">
                   Widening spreads signal credit stress. IG &gt;2% or HY &gt;6% indicates elevated risk-off pressure.
                 </p>
+              </div>
+            </div>
+
+            {/* Economic Indicators + Market Sentiment */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Economic Indicators */}
+              <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-5">
+                <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest mb-4">
+                  Economic Indicators
+                </p>
+                <div className="space-y-3">
+                  {[
+                    {
+                      label: "CPI Inflation (YoY)",
+                      value: data.economics?.cpiYoY,
+                      sub: "Consumer Price Index",
+                      warn: 3,
+                      danger: 5,
+                    },
+                    {
+                      label: "Core PCE (YoY)",
+                      value: data.economics?.corePceYoY,
+                      sub: "Fed's preferred inflation gauge",
+                      warn: 2.5,
+                      danger: 4,
+                    },
+                    {
+                      label: "Unemployment Rate",
+                      value: data.economics?.unemployment,
+                      sub: "U-3 headline rate",
+                      warn: 5,
+                      danger: 7,
+                      invert: true,
+                    },
+                  ].map(({ label, value, sub, warn, danger, invert }) => {
+                    const elevated = invert
+                      ? value != null && value > danger!
+                      : value != null && value > danger!;
+                    const moderate = invert
+                      ? value != null && value > warn! && value <= danger!
+                      : value != null && value > warn! && value <= danger!;
+                    const valueClass = value == null
+                      ? "text-zinc-400"
+                      : elevated ? "text-red-500"
+                      : moderate ? "text-amber-600 dark:text-amber-400"
+                      : "text-emerald-600 dark:text-emerald-400";
+                    return (
+                      <div key={label} className="flex items-center justify-between">
+                        <div>
+                          <p className="text-xs font-medium text-zinc-700 dark:text-zinc-300">{label}</p>
+                          <p className="text-[10px] text-zinc-400">{sub}</p>
+                        </div>
+                        <p className={`text-lg font-bold ${valueClass}`}>
+                          {value != null ? `${value.toFixed(1)}%` : "—"}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="text-xs text-zinc-400 mt-4 leading-relaxed">
+                  Source: FRED (BLS/BEA). CPI &gt;3% or Core PCE &gt;2.5% suggests the Fed remains hawkish.
+                </p>
+              </div>
+
+              {/* Fear & Greed */}
+              <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-5">
+                <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest mb-4">
+                  Market Sentiment
+                </p>
+                {(() => {
+                  const score = data.sentiment?.fearGreedScore ?? null;
+                  const rating = data.sentiment?.fearGreedRating ?? null;
+                  const pct = score != null ? score : 0;
+                  const color =
+                    score == null ? "bg-zinc-300 dark:bg-zinc-700"
+                    : score <= 25 ? "bg-red-500"
+                    : score <= 45 ? "bg-orange-400"
+                    : score <= 55 ? "bg-zinc-400"
+                    : score <= 75 ? "bg-emerald-500"
+                    : "bg-emerald-600";
+                  const textColor =
+                    score == null ? "text-zinc-400"
+                    : score <= 25 ? "text-red-500"
+                    : score <= 45 ? "text-orange-500"
+                    : score <= 55 ? "text-zinc-500 dark:text-zinc-400"
+                    : score <= 75 ? "text-emerald-600 dark:text-emerald-400"
+                    : "text-emerald-600 dark:text-emerald-400 font-bold";
+                  return (
+                    <div>
+                      <div className="flex items-end gap-3 mb-3">
+                        <p className={`text-4xl font-bold ${textColor}`}>
+                          {score != null ? score.toFixed(0) : "—"}
+                        </p>
+                        {rating && (
+                          <p className={`text-sm font-semibold mb-1 ${textColor}`}>{rating}</p>
+                        )}
+                      </div>
+                      <div className="relative h-3 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden mb-1">
+                        <div
+                          className={`h-full rounded-full ${color} transition-all`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <div className="flex justify-between text-[9px] text-zinc-400 mb-4">
+                        <span>Extreme Fear</span>
+                        <span>Neutral</span>
+                        <span>Extreme Greed</span>
+                      </div>
+                      <p className="text-xs text-zinc-400 leading-relaxed">
+                        CNN Fear &amp; Greed Index (0–100). Extreme fear often signals a contrarian buying opportunity; extreme greed may indicate overheating.
+                      </p>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
 

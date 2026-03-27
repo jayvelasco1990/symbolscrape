@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import * as cheerio from "cheerio";
 import { getDb } from "@/lib/db";
 import { computeRiskProfile, computeRateSensitivity } from "@/lib/riskScores";
 
@@ -54,6 +53,51 @@ async function fetchFredSeries(id: string): Promise<number | null> {
   }
 }
 
+async function fetchFredYoY(id: string): Promise<{ value: number | null; yoyChange: number | null }> {
+  try {
+    const res = await fetch(
+      `https://fred.stlouisfed.org/graph/fredgraph.csv?id=${id}`,
+      { headers: { "User-Agent": HEADERS["User-Agent"] } }
+    );
+    if (!res.ok) return { value: null, yoyChange: null };
+    const text = await res.text();
+    const lines = text.trim().split("\n").slice(1);
+    const entries: number[] = [];
+    for (const line of lines) {
+      const val = line.split(",")[1]?.trim();
+      if (val && val !== "." && !isNaN(parseFloat(val))) entries.push(parseFloat(val));
+    }
+    const latest = entries.length > 0 ? entries[entries.length - 1] : null;
+    const yearAgo = entries.length >= 13 ? entries[entries.length - 13] : null;
+    const yoyChange =
+      latest != null && yearAgo != null && yearAgo !== 0
+        ? parseFloat(((latest / yearAgo - 1) * 100).toFixed(2))
+        : null;
+    return { value: latest, yoyChange };
+  } catch {
+    return { value: null, yoyChange: null };
+  }
+}
+
+async function fetchFearAndGreed(): Promise<{ score: number | null; rating: string | null }> {
+  try {
+    const res = await fetch(
+      "https://production.dataviz.cnn.io/index/fearandgreed/graphdata",
+      { headers: { "User-Agent": HEADERS["User-Agent"], Referer: "https://www.cnn.com/" } }
+    );
+    if (!res.ok) return { score: null, rating: null };
+    const json = await res.json();
+    const fg = json?.fear_and_greed;
+    if (!fg) return { score: null, rating: null };
+    return {
+      score: fg.score != null ? parseFloat(parseFloat(fg.score).toFixed(1)) : null,
+      rating: fg.rating ?? null,
+    };
+  } catch {
+    return { score: null, rating: null };
+  }
+}
+
 async function fetchVix(): Promise<number | null> {
   try {
     const res = await fetch(
@@ -71,31 +115,6 @@ async function fetchVix(): Promise<number | null> {
   }
 }
 
-async function scrapeFinvizStats(
-  symbol: string
-): Promise<Record<string, string> | null> {
-  try {
-    const res = await fetch(`https://finviz.com/quote.ashx?t=${symbol}`, {
-      headers: { ...HEADERS, Referer: "https://finviz.com/" },
-    });
-    if (!res.ok) return null;
-    const $ = cheerio.load(await res.text());
-    const stats: Record<string, string> = {};
-    $("table.snapshot-table2 tr, table.fullview-ratings-outer tr").each(
-      (_, row) => {
-        const cells = $(row).find("td");
-        for (let i = 0; i + 1 < cells.length; i += 2) {
-          const key = $(cells[i]).text().trim();
-          const val = $(cells[i + 1]).text().trim();
-          if (key && val) stats[key] = val;
-        }
-      }
-    );
-    return Object.keys(stats).length > 0 ? stats : null;
-  } catch {
-    return null;
-  }
-}
 
 interface EtfData {
   symbol: string;
@@ -162,24 +181,6 @@ async function fetchYahooEtfData(symbol: string, name: string): Promise<EtfData>
   }
 }
 
-function parseNum(s: string | undefined): number | null {
-  if (!s || s === "-") return null;
-  const n = parseFloat(s.replace(/[^0-9.-]/g, ""));
-  return isNaN(n) ? null : n;
-}
-
-function toEtfData(stats: Record<string, string> | null, symbol: string, name: string) {
-  return {
-    symbol,
-    name,
-    price: stats?.["Price"] ?? "",
-    perfWeek: parseNum(stats?.["Perf Week"]),
-    perfMonth: parseNum(stats?.["Perf Month"]),
-    perfYTD: parseNum(stats?.["Perf YTD"]),
-    sma200: parseNum(stats?.["SMA200"]),
-  };
-}
-
 export async function GET() {
   const db = getDb();
 
@@ -191,7 +192,7 @@ export async function GET() {
     const age = Date.now() - new Date(cached.fetched_at + "Z").getTime();
     if (age < CACHE_TTL_MS) {
       const parsed = JSON.parse(cached.data);
-      if (parsed.sectors?.[0]?.rateRisk !== undefined && parsed.indexes !== undefined) {
+      if (parsed.sectors?.[0]?.rateRisk !== undefined && parsed.indexes !== undefined && parsed.economics !== undefined && parsed.sentiment !== undefined) {
         return NextResponse.json({ ...parsed, cached: true, fetchedAt: cached.fetched_at });
       }
     }
@@ -199,8 +200,14 @@ export async function GET() {
 
   const allSubsectorEtfs = SECTOR_ETFS.flatMap((s) => s.subsectors);
 
-  // Finviz for indexes + sectors (~17 requests), Yahoo for subsectors (~13 requests) — run concurrently
-  const [[dgs10, dgs2, fedFunds, igSpread, hySpread, vix], finvizResults, subsectorData] =
+  // All ETFs via Yahoo Finance — single data source ensures consistent YTD/perf methodology
+  const allEtfs = [
+    ...INDEX_ETFS,
+    ...SECTOR_ETFS.map((e) => ({ symbol: e.symbol, name: e.name })),
+    ...allSubsectorEtfs,
+  ];
+
+  const [[dgs10, dgs2, fedFunds, igSpread, hySpread, vix], allEtfData, cpi, corePce, fearAndGreed, unemployment] =
     await Promise.all([
       Promise.all([
         fetchFredSeries("DGS10"),
@@ -210,19 +217,21 @@ export async function GET() {
         fetchFredSeries("BAMLH0A0HYM2"),
         fetchVix(),
       ]),
-      Promise.all([
-        ...INDEX_ETFS.map((e) => scrapeFinvizStats(e.symbol)),
-        ...SECTOR_ETFS.map((e) => scrapeFinvizStats(e.symbol)),
-      ]),
-      Promise.all(allSubsectorEtfs.map((e) => fetchYahooEtfData(e.symbol, e.name))),
+      Promise.all(allEtfs.map((e) => fetchYahooEtfData(e.symbol, e.name))),
+      fetchFredYoY("CPIAUCSL"),
+      fetchFredYoY("PCEPILFE"),
+      fetchFearAndGreed(),
+      fetchFredSeries("UNRATE"),
     ]);
 
-  const indexResults  = finvizResults.slice(0, INDEX_ETFS.length);
-  const sectorResults = finvizResults.slice(INDEX_ETFS.length);
+  const nIndexes    = INDEX_ETFS.length;
+  const nSectors    = SECTOR_ETFS.length;
+  const indexData   = allEtfData.slice(0, nIndexes);
+  const sectorData  = allEtfData.slice(nIndexes, nIndexes + nSectors);
+  const subsectorData = allEtfData.slice(nIndexes + nSectors);
 
   // SPY is always the first index
-  const spyStats = indexResults[0];
-  const spySma200 = parseNum(spyStats?.["SMA200"]);
+  const spySma200     = indexData[0].sma200;
   const spyAboveMA200 = spySma200 != null && spySma200 > 0;
 
   const yieldCurve =
@@ -236,7 +245,7 @@ export async function GET() {
     else if (vix > 25 || spySma200 < -5) regime = "risk-off";
   }
 
-  const indexes = INDEX_ETFS.map((etf, i) => toEtfData(indexResults[i], etf.symbol, etf.name));
+  const indexes = indexData;
 
   let subOffset = 0;
   const sectors = SECTOR_ETFS.map((etf, i) => {
@@ -244,7 +253,7 @@ export async function GET() {
     const subsectors = etf.subsectors.map((_, j) => subsectorData[subOffset + j]);
     subOffset += etf.subsectors.length;
     return {
-      ...toEtfData(sectorResults[i], etf.symbol, etf.name),
+      ...sectorData[i],
       rateRisk: computeRateSensitivity(etf.name),
       climateRisk: risk.climate,
       subsectors,
@@ -262,13 +271,22 @@ export async function GET() {
       isInverted: yieldCurve != null && yieldCurve < 0,
     },
     spreads: { ig: igSpread, hy: hySpread },
+    economics: {
+      cpiYoY: cpi.yoyChange,
+      corePceYoY: corePce.yoyChange,
+      unemployment,
+    },
+    sentiment: {
+      fearGreedScore: fearAndGreed.score,
+      fearGreedRating: fearAndGreed.rating,
+    },
     spy: {
-      price: spyStats?.["Price"] ?? "",
+      price: indexData[0].price,
       sma200: spySma200,
       aboveMA200: spyAboveMA200,
-      perfWeek: parseNum(spyStats?.["Perf Week"]),
-      perfMonth: parseNum(spyStats?.["Perf Month"]),
-      perfYTD: parseNum(spyStats?.["Perf YTD"]),
+      perfWeek: indexData[0].perfWeek,
+      perfMonth: indexData[0].perfMonth,
+      perfYTD: indexData[0].perfYTD,
     },
     indexes,
     sectors,
