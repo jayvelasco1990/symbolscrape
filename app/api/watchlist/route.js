@@ -18,8 +18,10 @@ export async function POST(req) {
   return NextResponse.json({ ticker: ticker.toUpperCase() });
 }
 
+const VALID_STATUSES = new Set(["intact", "watch", "broken"]);
+
 export async function PATCH(req) {
-  const { ticker, quantity, unit_cost } = await req.json();
+  const { ticker, quantity, unit_cost, thesis, thesis_status } = await req.json();
   if (!ticker) return NextResponse.json({ error: "ticker required" }, { status: 400 });
   const db = getDb();
   if (quantity !== undefined) {
@@ -31,6 +33,18 @@ export async function PATCH(req) {
   if (unit_cost !== undefined) {
     db.prepare("UPDATE watchlist SET unit_cost = ? WHERE ticker = ?").run(
       unit_cost === null ? null : Math.max(0, parseFloat(unit_cost) || 0),
+      ticker.toUpperCase()
+    );
+  }
+  if (thesis !== undefined) {
+    db.prepare("UPDATE watchlist SET thesis = ? WHERE ticker = ?").run(
+      thesis || null,
+      ticker.toUpperCase()
+    );
+  }
+  if (thesis_status !== undefined && VALID_STATUSES.has(thesis_status)) {
+    db.prepare("UPDATE watchlist SET thesis_status = ? WHERE ticker = ?").run(
+      thesis_status,
       ticker.toUpperCase()
     );
   }
