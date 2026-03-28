@@ -105,12 +105,15 @@ export async function GET(request: NextRequest) {
   const r        = request.nextUrl.searchParams.get("r") ?? "1";
   const dividend = request.nextUrl.searchParams.get("dividend") === "true";
   const rsi      = request.nextUrl.searchParams.get("rsi") === "true";
+  const beta     = request.nextUrl.searchParams.get("beta") ?? "";
+
+  const VALID_BETA = new Set(["u0.5","u1","u1.5","u2","o0.5","o1","o1.5","o2"]);
 
   const cfg = SCREENERS[screener] ?? SCREENERS.megacap;
   const filters = [
     cfg.filters,
     dividend ? "fa_div_pos" : "",
-    "ta_beta_u1",
+    VALID_BETA.has(beta) ? `ta_beta_${beta}` : "",
     rsi ? "ta_rsi_nob50" : "",
   ]
     .filter(Boolean)
