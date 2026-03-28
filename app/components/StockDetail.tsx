@@ -14,6 +14,7 @@ import DividendMetrics from "./DividendMetrics";
 import DisruptionRisk from "./DisruptionRisk";
 import BusinessQuality from "./BusinessQuality";
 import GrowthMetrics from "./GrowthMetrics";
+import PriceChart from "./PriceChart";
 
 type TableRow = Record<string, string>;
 
@@ -216,6 +217,9 @@ export default function StockDetail({
 
   return (
     <div className="flex flex-col gap-3">
+
+      {/* ── Price Chart ─────────────────────────────── */}
+      <PriceChart ticker={ticker} />
 
       {/* ── Valuation ───────────────────────────────── */}
       {iv && (
