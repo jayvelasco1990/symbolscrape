@@ -20,10 +20,11 @@ interface Props {
   dividend: boolean;
   rsi: boolean;
   beta: string;
+  sort: string;
   onPageChange: (page: number) => void;
 }
 
-export default function StocksTable({ screener, page, dividend, rsi, beta, onPageChange }: Props) {
+export default function StocksTable({ screener, page, dividend, rsi, beta, sort, onPageChange }: Props) {
   const [headers, setHeaders] = useState<string[]>([]);
   const [rows, setRows] = useState<Row[]>([]);
   const [sorting, setSorting] = useState<SortingState>([]);
@@ -35,7 +36,7 @@ export default function StocksTable({ screener, page, dividend, rsi, beta, onPag
     setRows([]);
     setHeaders([]);
     const r = (page - 1) * PAGE_SIZE + 1;
-    fetch(`/api/stocks?screener=${screener}&r=${r}&dividend=${dividend}&rsi=${rsi}&beta=${beta}`)
+    fetch(`/api/stocks?screener=${screener}&r=${r}&dividend=${dividend}&rsi=${rsi}&beta=${beta}&sort=${sort}`)
       .then((res) => res.json())
       .then((data) => {
         setHeaders(data.headers ?? []);
@@ -43,7 +44,7 @@ export default function StocksTable({ screener, page, dividend, rsi, beta, onPag
       })
       .catch(() => setError("Failed to load stock data."))
       .finally(() => setLoading(false));
-  }, [screener, page, dividend, rsi, beta]);
+  }, [screener, page, dividend, rsi, beta, sort]);
 
   const SIGNAL_STYLE: Record<string, string> = {
     "Strong Buy": "bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800",

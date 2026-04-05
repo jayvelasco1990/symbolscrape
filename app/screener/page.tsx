@@ -31,6 +31,7 @@ export default function ScreenerPage() {
   const dividend  = searchParams.get("dividend") === "true";
   const rsi       = searchParams.get("rsi") === "true";
   const beta      = searchParams.get("beta") ?? "";
+  const sort      = searchParams.get("sort") ?? "asc";
   const activeTabData = TABS.find((t) => t.key === activeTab) ?? TABS[0];
 
   function buildUrl(overrides: Record<string, string | number | boolean>) {
@@ -40,6 +41,7 @@ export default function ScreenerPage() {
       dividend: String(dividend),
       rsi: String(rsi),
       beta,
+      sort,
       ...Object.fromEntries(Object.entries(overrides).map(([k, v]) => [k, String(v)])),
     };
     return `/screener?${new URLSearchParams(params).toString()}`;
@@ -99,6 +101,16 @@ export default function ScreenerPage() {
                 <span className={`w-2 h-2 rounded-full ${rsi ? "bg-emerald-500" : "bg-zinc-400"}`} />
                 RSI &lt; 50
               </button>
+              <button
+                onClick={() => router.push(buildUrl({ sort: sort === "asc" ? "desc" : "asc", page: 1 }))}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-all ${
+                  sort === "desc"
+                    ? "bg-emerald-50 dark:bg-emerald-950 border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300"
+                    : "bg-zinc-100 dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400"
+                }`}
+              >
+                P/E {sort === "desc" ? "↓ High" : "↑ Low"}
+              </button>
               <select
                 value={beta}
                 onChange={(e) => router.push(buildUrl({ beta: e.target.value, page: 1 }))}
@@ -128,6 +140,7 @@ export default function ScreenerPage() {
           dividend={dividend}
           rsi={rsi}
           beta={beta}
+          sort={sort}
           onPageChange={(p) => router.push(buildUrl({ page: p }))}
         />
       </div>

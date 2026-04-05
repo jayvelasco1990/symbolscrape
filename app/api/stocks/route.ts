@@ -2,12 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import * as cheerio from "cheerio";
 import { getDb } from "@/lib/db";
 
-const SCREENERS: Record<string, { filters: string; extra?: string }> = {
-  megacap:  { filters: "cap_mega",           extra: "&o=pe&ft=3" },
-  largecap: { filters: "cap_large,geo_usa",  extra: "&o=pe" },
-  midcap:   { filters: "cap_mid,geo_usa",    extra: "&o=pe" },
-  smallcap: { filters: "cap_small,geo_usa",  extra: "&o=pe" },
-  microcap: { filters: "cap_micro,geo_usa",  extra: "&o=pe" },
+const SCREENERS: Record<string, { filters: string; extraFilters?: string }> = {
+  megacap:  { filters: "cap_mega",          extraFilters: "&ft=3" },
+  largecap: { filters: "cap_large,geo_usa" },
+  midcap:   { filters: "cap_mid,geo_usa" },
+  smallcap: { filters: "cap_small,geo_usa" },
+  microcap: { filters: "cap_micro,geo_usa" },
 };
 
 const HEADERS = {
@@ -113,6 +113,7 @@ export async function GET(request: NextRequest) {
   const dividend = request.nextUrl.searchParams.get("dividend") === "true";
   const rsi      = request.nextUrl.searchParams.get("rsi") === "true";
   const beta     = request.nextUrl.searchParams.get("beta") ?? "";
+  const sortDesc = request.nextUrl.searchParams.get("sort") === "desc";
 
   const VALID_BETA = new Set(["u0.5","u1","u1.5","u2","o0.5","o1","o1.5","o2"]);
 
@@ -126,7 +127,8 @@ export async function GET(request: NextRequest) {
     .filter(Boolean)
     .join(",");
 
-  const baseQuery = `f=${filters}${cfg.extra ?? ""}&r=${r}`;
+  const sortParam = sortDesc ? "-pe" : "pe";
+  const baseQuery = `f=${filters}&o=${sortParam}${cfg.extraFilters ?? ""}&r=${r}`;
   const db = getDb();
 
   // Always fetch overview (display) and financial (dividend) in parallel
