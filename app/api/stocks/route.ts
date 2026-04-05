@@ -7,6 +7,7 @@ const SCREENERS: Record<string, { filters: string; extra?: string }> = {
   largecap: { filters: "cap_large,geo_usa",  extra: "&o=pe" },
   midcap:   { filters: "cap_mid,geo_usa",    extra: "&o=pe" },
   smallcap: { filters: "cap_small,geo_usa",  extra: "&o=pe" },
+  microcap: { filters: "cap_micro,geo_usa",  extra: "&o=pe" },
 };
 
 const HEADERS = {

@@ -8,6 +8,7 @@ const TABS = [
   { key: "largecap", label: "Large Cap", description: "Market cap $10B–$200B · USA" },
   { key: "midcap",   label: "Mid Cap",   description: "Market cap $2B–$10B · USA" },
   { key: "smallcap", label: "Small Cap", description: "Market cap $300M–$2B · USA" },
+  { key: "microcap", label: "Micro Cap", description: "Market cap $50M–$300M · USA" },
 ];
 
 const BETA_OPTIONS = [
