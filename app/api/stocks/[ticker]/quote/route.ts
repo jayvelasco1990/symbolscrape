@@ -145,37 +145,55 @@ async function scrapeReuters(symbol: string) {
 async function fetchExtendedMarket(symbol: string) {
   try {
     const res = await fetch(
-      `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbol}&fields=regularMarketPrice,regularMarketChange,regularMarketChangePercent,preMarketPrice,preMarketChange,preMarketChangePercent,preMarketTime,postMarketPrice,postMarketChange,postMarketChangePercent,postMarketTime,marketState`,
+      `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=price`,
       { headers: { "User-Agent": HEADERS["User-Agent"] } }
     );
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.error(`[extendedMarket] ${symbol} HTTP ${res.status}`);
+      return null;
+    }
     const json = await res.json();
-    const q = json?.quoteResponse?.result?.[0];
-    if (!q) return null;
+    const p = json?.quoteSummary?.result?.[0]?.price;
+    if (!p) {
+      console.error(`[extendedMarket] ${symbol} no price module:`, JSON.stringify(json).slice(0, 300));
+      return null;
+    }
 
+    const raw  = (field: { raw?: number } | undefined) => field?.raw ?? null;
     const fmt2 = (n: number) => n.toFixed(2);
-    const fmtPct = (n: number) => `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
+    const fmtPct    = (n: number) => `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
     const fmtChange = (n: number) => `${n >= 0 ? "+" : ""}${fmt2(n)}`;
+    const fmtTime   = (ts: number) =>
+      new Date(ts * 1000).toLocaleTimeString("en-US", {
+        hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: "America/New_York",
+      });
+
+    const regPrice  = raw(p.regularMarketPrice);
+    const regChange = raw(p.regularMarketChange);
+    const regPct    = raw(p.regularMarketChangePercent);
+    const prePx     = raw(p.preMarketPrice);
+    const preChg    = raw(p.preMarketChange);
+    const prePct    = raw(p.preMarketChangePercent);
+    const postPx    = raw(p.postMarketPrice);
+    const postChg   = raw(p.postMarketChange);
+    const postPct   = raw(p.postMarketChangePercent);
 
     return {
-      marketState: (q.marketState ?? "CLOSED") as string,
-      regularPrice: q.regularMarketPrice != null ? fmt2(q.regularMarketPrice) : null,
-      regularChange: q.regularMarketChange != null ? fmtChange(q.regularMarketChange) : null,
-      regularChangePct: q.regularMarketChangePercent != null ? fmtPct(q.regularMarketChangePercent) : null,
-      preMarketPrice: q.preMarketPrice != null ? fmt2(q.preMarketPrice) : null,
-      preMarketChange: q.preMarketChange != null ? fmtChange(q.preMarketChange) : null,
-      preMarketChangePct: q.preMarketChangePercent != null ? fmtPct(q.preMarketChangePercent) : null,
-      preMarketTime: q.preMarketTime != null
-        ? new Date(q.preMarketTime * 1000).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: "America/New_York" })
-        : null,
-      postMarketPrice: q.postMarketPrice != null ? fmt2(q.postMarketPrice) : null,
-      postMarketChange: q.postMarketChange != null ? fmtChange(q.postMarketChange) : null,
-      postMarketChangePct: q.postMarketChangePercent != null ? fmtPct(q.postMarketChangePercent) : null,
-      postMarketTime: q.postMarketTime != null
-        ? new Date(q.postMarketTime * 1000).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: "America/New_York" })
-        : null,
+      marketState:       (p.marketState ?? "CLOSED") as string,
+      regularPrice:      regPrice  != null ? fmt2(regPrice)        : null,
+      regularChange:     regChange != null ? fmtChange(regChange)  : null,
+      regularChangePct:  regPct    != null ? fmtPct(regPct * 100)  : null,
+      preMarketPrice:    prePx     != null ? fmt2(prePx)           : null,
+      preMarketChange:   preChg    != null ? fmtChange(preChg)     : null,
+      preMarketChangePct: prePct   != null ? fmtPct(prePct * 100)  : null,
+      preMarketTime:     p.preMarketTime  != null ? fmtTime(p.preMarketTime)  : null,
+      postMarketPrice:   postPx    != null ? fmt2(postPx)          : null,
+      postMarketChange:  postChg   != null ? fmtChange(postChg)    : null,
+      postMarketChangePct: postPct != null ? fmtPct(postPct * 100) : null,
+      postMarketTime:    p.postMarketTime != null ? fmtTime(p.postMarketTime) : null,
     };
-  } catch {
+  } catch (e) {
+    console.error(`[extendedMarket] ${symbol} error:`, e);
     return null;
   }
 }
