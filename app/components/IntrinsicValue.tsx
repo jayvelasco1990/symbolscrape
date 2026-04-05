@@ -1,9 +1,31 @@
+interface SectorBenchmark { cheap: number; fair: number }
+
+const SECTOR_EVEB: Record<string, SectorBenchmark | null> = {
+  "Technology":             { cheap: 15, fair: 25 },
+  "Health Care":            { cheap: 12, fair: 18 },
+  "Healthcare":             { cheap: 12, fair: 18 },
+  "Energy":                 { cheap: 5,  fair: 8  },
+  "Utilities":              { cheap: 8,  fair: 12 },
+  "Industrials":            { cheap: 9,  fair: 14 },
+  "Consumer Defensive":     { cheap: 10, fair: 14 },
+  "Consumer Cyclical":      { cheap: 9,  fair: 13 },
+  "Basic Materials":        { cheap: 7,  fair: 11 },
+  "Communication Services": { cheap: 8,  fair: 12 },
+  "Financial":              null, // debt is core to business model
+  "Financial Services":     null,
+  "Real Estate":            null, // use EV/FFO instead
+};
+const DEFAULT_EVEB: SectorBenchmark = { cheap: 10, fair: 15 };
+
 interface Props {
   price: string;
   fairValue: string;
   formula?: string;
   note?: string;
   netCashPerShare?: string;
+  evEbitda?: string;
+  fcfYield?: number | null;
+  sector?: string;
 }
 
 function parseNum(s: string) {
@@ -14,7 +36,7 @@ function fmt(n: number) {
   return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-export default function IntrinsicValue({ price, fairValue, formula, note, netCashPerShare }: Props) {
+export default function IntrinsicValue({ price, fairValue, formula, note, netCashPerShare, evEbitda, fcfYield, sector }: Props) {
   const hasAny = price || fairValue;
   if (!hasAny) return null;
 
@@ -106,6 +128,88 @@ export default function IntrinsicValue({ price, fairValue, formula, note, netCas
           </div>
         </div>
       )}
+
+      {/* ── EV/EBITDA + FCF Yield ── */}
+      {(evEbitda || fcfYield != null) && (() => {
+        const evN = evEbitda ? parseNum(evEbitda) : null;
+        const benchmark = sector
+          ? (SECTOR_EVEB[sector] !== undefined ? SECTOR_EVEB[sector] : DEFAULT_EVEB)
+          : DEFAULT_EVEB;
+        const isFinancial = benchmark === null;
+
+        let evColor = "text-zinc-500 dark:text-zinc-400";
+        let evLabel = "";
+        if (!isFinancial && evN && evN > 0 && benchmark) {
+          if (evN <= benchmark.cheap)      { evColor = "text-emerald-600 dark:text-emerald-400"; evLabel = "Cheap"; }
+          else if (evN <= benchmark.fair)  { evColor = "text-amber-600 dark:text-amber-400";     evLabel = "Fair";  }
+          else                             { evColor = "text-red-500 dark:text-red-400";          evLabel = "Expensive"; }
+        }
+
+        const fcfColor = fcfYield == null ? "text-zinc-400"
+          : fcfYield >= 7 ? "text-emerald-600 dark:text-emerald-400"
+          : fcfYield >= 4 ? "text-amber-600 dark:text-amber-400"
+          : fcfYield >= 2 ? "text-zinc-500 dark:text-zinc-400"
+          : "text-red-500 dark:text-red-400";
+        const fcfLabel = fcfYield == null ? ""
+          : fcfYield >= 7 ? "Excellent"
+          : fcfYield >= 4 ? "Good"
+          : fcfYield >= 2 ? "Fair"
+          : "Weak";
+
+        return (
+          <div className="mt-4 pt-4 border-t border-zinc-200 dark:border-zinc-700 grid grid-cols-2 gap-4">
+            {/* EV/EBITDA */}
+            <div>
+              <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest mb-1">
+                EV / EBITDA
+              </p>
+              {isFinancial ? (
+                <p className="text-sm text-zinc-400">N/A for financials</p>
+              ) : evN && evN > 0 ? (
+                <>
+                  <div className="flex items-baseline gap-2">
+                    <p className={`text-2xl font-bold ${evColor}`}>{evN.toFixed(1)}x</p>
+                    {evLabel && (
+                      <span className={`text-xs font-semibold ${evColor}`}>{evLabel}</span>
+                    )}
+                  </div>
+                  {benchmark && (
+                    <p className="text-[10px] text-zinc-400 mt-0.5">
+                      {sector ?? "Market"} benchmarks · &lt;{benchmark.cheap}x cheap · &lt;{benchmark.fair}x fair
+                    </p>
+                  )}
+                </>
+              ) : (
+                <>
+                  <p className="text-xl font-bold text-zinc-400">—</p>
+                  <p className="text-[10px] text-zinc-400 mt-0.5">Not reported — likely negative or near-zero EBITDA</p>
+                </>
+              )}
+            </div>
+            {/* FCF Yield */}
+            <div>
+              <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest mb-1">
+                FCF Yield
+              </p>
+              {fcfYield != null && fcfYield > 0 ? (
+                <>
+                  <div className="flex items-baseline gap-2">
+                    <p className={`text-2xl font-bold ${fcfColor}`}>{fcfYield.toFixed(1)}%</p>
+                    {fcfLabel && (
+                      <span className={`text-xs font-semibold ${fcfColor}`}>{fcfLabel}</span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-zinc-400 mt-0.5">
+                    &gt;7% excellent · &gt;4% good · &gt;2% fair
+                  </p>
+                </>
+              ) : (
+                <p className="text-xl font-bold text-zinc-400">—</p>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {netCashPerShare && (() => {
         const nc = parseNum(netCashPerShare);

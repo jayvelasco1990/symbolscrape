@@ -5,6 +5,7 @@ import { getDb } from "@/lib/db";
 const SCREENERS: Record<string, { filters: string; extra?: string }> = {
   megacap:  { filters: "cap_mega",           extra: "&o=pe&ft=3" },
   largecap: { filters: "cap_large,geo_usa",  extra: "&o=pe" },
+  midcap:   { filters: "cap_mid,geo_usa",    extra: "&o=pe" },
   smallcap: { filters: "cap_small,geo_usa",  extra: "&o=pe" },
 };
 
@@ -77,7 +78,7 @@ function computeSignal(
   // Require both P/E and P/B — Graham Rule is the core signal
   if (!peN || peN < 0 || !pbN) return "No Data";
 
-  const pfcfN = parseNum(pfcf);
+  const pfcfN      = parseNum(pfcf);
   const epsGrowthN = parseNum(epsNextY);
 
   let score = 0;
@@ -91,12 +92,17 @@ function computeSignal(
   // Positive free cash flow (P/FCF exists and isn't stretched)
   if (pfcfN > 0 && pfcfN < 35) score += 1;
 
+  // FCF Yield > 3% — meaningful cash return relative to price paid
+  const fcfYield = pfcfN > 0 ? 100 / pfcfN : 0;
+  if (fcfYield > 3) score += 1;
+
   // Forward earnings growth estimate
   if (epsGrowthN > 0) score += 1;
 
-  if (score >= 4) return "Strong Buy";
-  if (score === 3) return "Buy";
-  if (score === 2) return "Neutral";
+  // Max score = 6; thresholds adjusted upward to reflect stronger criteria
+  if (score >= 5) return "Strong Buy";
+  if (score === 4) return "Buy";
+  if (score === 3) return "Neutral";
   return "Avoid";
 }
 
@@ -227,6 +233,25 @@ export async function GET(request: NextRequest) {
     return `${rsYTD.toFixed(1)}|${trend}`;
   }
 
+  function computeMomentumFlag(ticker: string, sector: string): string {
+    const perf = perfByTicker[ticker];
+    if (!perf || perf.ytd == null) return "Weak";
+    const etf = SECTOR_TO_ETF[sector];
+    const rsYTD = etf && sectorYTD[etf] != null ? perf.ytd - sectorYTD[etf] : null;
+    const rsMo  = etf && sectorMo[etf]  != null && perf.month != null ? perf.month - sectorMo[etf] : null;
+    const accelerating = rsMo != null && rsYTD != null && rsMo > rsYTD + 1;
+    if (rsYTD != null) {
+      if (rsYTD > 5 || (rsYTD > 2 && accelerating)) return "Strong";
+      if (rsYTD > 0 && perf.ytd > 0) return "Moderate";
+      if (rsYTD < -5 || perf.ytd < -15) return "Bearish";
+      return "Weak";
+    }
+    if (perf.ytd > 10)  return "Strong";
+    if (perf.ytd > 0)   return "Moderate";
+    if (perf.ytd < -15) return "Bearish";
+    return "Weak";
+  }
+
   const tickers = rows111.map((r) => r["Ticker"]).filter(Boolean);
 
   // Load cached signals from SQLite
@@ -289,9 +314,10 @@ export async function GET(request: NextRequest) {
 
   const DROP = new Set(["No.", "Volume", "Industry", "Country", "Change"]);
 
-  // Build final output: drop noise columns, inject "Signal" + "RS" at front, "Dividend" after Price
+  // Build final output: drop noise columns, inject "Signal" + "Momentum" + "RS" at front, "Dividend" after Price
   const displayHeaders = [
     "Signal",
+    "Momentum",
     "RS",
     ...headers111
       .filter((h) => !DROP.has(h))
@@ -306,6 +332,7 @@ export async function GET(request: NextRequest) {
     }
     return {
       Signal: signalByTicker[ticker] ?? "No Data",
+      Momentum: computeMomentumFlag(ticker, row["Sector"] ?? ""),
       RS: computeRS(ticker, row["Sector"] ?? ""),
       ...cleaned,
       Dividend: row["_dividend"] ?? "",

@@ -59,6 +59,30 @@ export default function StocksTable({ screener, page, dividend, rsi, beta, onPag
     cell: (info) => {
       const value = info.getValue() as string;
 
+      if (h === "Momentum") {
+        const MOMENTUM_STYLE: Record<string, string> = {
+          Strong:   "bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800",
+          Moderate: "bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800",
+          Weak:     "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700",
+          Bearish:  "bg-red-100 dark:bg-red-950 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800",
+        };
+        const MOMENTUM_DOT: Record<string, string> = {
+          Strong: "bg-emerald-500", Moderate: "bg-indigo-500", Weak: "bg-zinc-400", Bearish: "bg-red-500",
+        };
+        if (!value) return <span className="text-zinc-300 dark:text-zinc-600 text-[10px]">—</span>;
+        const cls = MOMENTUM_STYLE[value] ?? MOMENTUM_STYLE["Weak"];
+        const dot = MOMENTUM_DOT[value] ?? MOMENTUM_DOT["Weak"];
+        return (
+          <span
+            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap ${cls}`}
+            title="Momentum: RS vs sector ETF (YTD) + trend acceleration"
+          >
+            <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
+            {value}
+          </span>
+        );
+      }
+
       if (h === "Signal") {
         if (value === "No Data") {
           return (
@@ -93,7 +117,7 @@ export default function StocksTable({ screener, page, dividend, rsi, beta, onPag
           trend === "↑" ? "text-emerald-500 dark:text-emerald-400" :
           trend === "↓" ? "text-red-400" : "text-zinc-400";
         return (
-          <span className="flex items-center gap-0.5 whitespace-nowrap" title="Relative Strength vs sector ETF (YTD). Arrow shows if RS is accelerating (↑) or fading (↓) vs 1M.">
+          <span className="inline-flex items-center gap-0.5 whitespace-nowrap" title="Relative Strength vs sector ETF (YTD). Arrow shows if RS is accelerating (↑) or fading (↓) vs 1M.">
             <span className={`font-semibold text-[11px] ${color}`}>
               {num > 0 ? "+" : ""}{numStr}%
             </span>

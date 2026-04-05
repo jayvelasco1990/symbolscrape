@@ -405,12 +405,20 @@ export async function GET(
   const riskProfile     = computeRiskProfile(finviz?.sector ?? "", finviz?.description || reuters.description);
   const rateSensitivity = computeRateSensitivity(finviz?.sector ?? "");
 
+  // EV/EBITDA and FCF Yield — already in Finviz stats
+  const parseVal = (s: string) => parseFloat(s.replace(/[^0-9.-]/g, "")) || 0;
+  const evEbitda = finviz?.stats?.["EV/EBITDA"] ?? "";
+  const pfcfRaw  = finviz?.stats?.["P/FCF"] ?? "";
+  const pfcfN    = parseVal(pfcfRaw);
+  const fcfYield = pfcfN > 0 ? parseFloat((100 / pfcfN).toFixed(2)) : null;
+
   const hasReutersData =
     reuters.financials.incomeStatement.length ||
     reuters.financials.balanceSheet.length ||
     reuters.financials.cashFlow.length;
 
   const quality = { moatQuality, insiderActivity, riskProfile, rateSensitivity, growthMetrics };
+  const valuationExtras = { evEbitda, fcfYield, sector: finviz?.sector ?? "" };
 
   if (hasReutersData) {
     return NextResponse.json({
@@ -420,6 +428,7 @@ export async function GET(
       description: finviz?.description || reuters.description,
       intrinsicValue, netCashPerShare,
       debtToRevenue, debtToEbitda, dividendMetrics,
+      ...valuationExtras,
       ...quality,
     });
   }
@@ -432,6 +441,7 @@ export async function GET(
       priceChange: "",
       intrinsicValue, netCashPerShare,
       debtToRevenue, debtToEbitda, dividendMetrics,
+      ...valuationExtras,
       ...quality,
     });
   }
@@ -446,6 +456,7 @@ export async function GET(
     dividendMetrics: null,
     debtToRevenue: "",
     debtToEbitda: "",
+    ...valuationExtras,
     ...quality,
   });
 }

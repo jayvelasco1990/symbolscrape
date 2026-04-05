@@ -68,7 +68,7 @@ function ThesisRow({ item, autoData, onUpdate }) {
 
   return (
     <tr className="border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-900/40">
-      <td colSpan={9} className="px-6 pb-4 pt-2">
+      <td colSpan={10} className="px-6 pb-4 pt-2">
         {/* Algorithm rationale */}
         {autoData ? (
           <div className="mb-3">
@@ -170,6 +170,7 @@ export default function WatchlistPage() {
   const [valuation, setValuation] = useState(null);
   const [valuationLoading, setValuationLoading] = useState(false);
   const [livePrices, setLivePrices] = useState({});
+  const [momentum, setMomentum] = useState({});
   const [statusFilter, setStatusFilter] = useState("all");
   const [expandedThesis, setExpandedThesis] = useState(new Set());
   // ticker → { status, flags, summary }
@@ -198,6 +199,16 @@ export default function WatchlistPage() {
           const map = {};
           for (const row of rows) map[row.ticker] = row;
           setLivePrices(map);
+        })
+        .catch(() => {});
+
+      // Fetch momentum scores (6h cached)
+      fetch("/api/watchlist/momentum")
+        .then((r) => r.json())
+        .then((rows) => {
+          const map = {};
+          for (const row of rows) map[row.ticker] = row;
+          setMomentum(map);
         })
         .catch(() => {});
 
@@ -468,6 +479,7 @@ export default function WatchlistPage() {
                 <tr className="border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900">
                   <th className="px-6 py-3 text-left font-semibold text-zinc-700 dark:text-zinc-300">Ticker</th>
                   <th className="px-4 py-3 text-left font-semibold text-zinc-500">Thesis</th>
+                  <th className="px-4 py-3 text-left font-semibold text-zinc-500">Momentum</th>
                   <th className="px-6 py-3 text-right font-semibold text-zinc-500">Price</th>
                   <th className="px-6 py-3 text-right font-semibold text-zinc-500">Day</th>
                   <th className="px-6 py-3 text-right font-semibold text-zinc-500">Unit Cost</th>
@@ -521,6 +533,33 @@ export default function WatchlistPage() {
                           )}
                           <span className="opacity-40 ml-0.5">{isExpanded ? "▲" : "▼"}</span>
                         </button>
+                      </td>
+                      <td className="px-4 py-4">
+                        {(() => {
+                          const mo = momentum[item.ticker];
+                          if (!mo) return <span className="text-zinc-300 dark:text-zinc-600 text-xs animate-pulse">…</span>;
+                          const STYLE = {
+                            Strong:   "bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800",
+                            Moderate: "bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800",
+                            Weak:     "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700",
+                            Bearish:  "bg-red-100 dark:bg-red-950 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800",
+                          };
+                          const DOT = { Strong: "bg-emerald-500", Moderate: "bg-indigo-500", Weak: "bg-zinc-400", Bearish: "bg-red-500" };
+                          const cls = STYLE[mo.label] ?? STYLE.Weak;
+                          const dot = DOT[mo.label]   ?? DOT.Weak;
+                          return (
+                            <div
+                              className={`inline-flex flex-col gap-0.5 cursor-default`}
+                              title={`RSI: ${mo.rsi ?? "—"} · SMA50: ${mo.sma50Pct != null ? (mo.sma50Pct > 0 ? "+" : "") + mo.sma50Pct + "%" : "—"} · SMA200: ${mo.sma200Pct != null ? (mo.sma200Pct > 0 ? "+" : "") + mo.sma200Pct + "%" : "—"} · 1M: ${mo.roc1m != null ? (mo.roc1m > 0 ? "+" : "") + mo.roc1m + "%" : "—"}`}
+                            >
+                              <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold border ${cls}`}>
+                                <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
+                                {mo.label}
+                              </span>
+                              <span className="text-[10px] text-zinc-400 tabular-nums pl-0.5">{mo.score}/100</span>
+                            </div>
+                          );
+                        })()}
                       </td>
                       <td className="px-6 py-4 text-right font-medium text-zinc-800 dark:text-zinc-200 tabular-nums text-sm">
                         {price > 0 ? `$${fmt(price)}` : "—"}

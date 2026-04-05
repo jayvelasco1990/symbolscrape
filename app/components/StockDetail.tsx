@@ -32,6 +32,9 @@ interface QuoteData {
   netCashPerShare?: string;
   debtToRevenue?: string;
   debtToEbitda?: string;
+  evEbitda?: string;
+  fcfYield?: number | null;
+  sector?: string;
   dividendMetrics?: {
     annualAmount: string;
     yieldPct: string;
@@ -231,6 +234,9 @@ export default function StockDetail({
             formula={iv.formula}
             note={iv.note}
             netCashPerShare={data.netCashPerShare}
+            evEbitda={data.evEbitda}
+            fcfYield={data.fcfYield}
+            sector={data.sector}
           />
         </>
       )}
