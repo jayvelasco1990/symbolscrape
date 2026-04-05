@@ -187,7 +187,7 @@ function extractUnits(rows: TableRow[]): string | undefined {
 
 function PriceHeader({ data, price }: { data: QuoteData; price: string }) {
   const em = data.extendedMarket;
-  const state = em?.marketState ?? "REGULAR";
+  const state = em?.marketState ?? "CLOSED";
 
   // Determine which extended-hours block to show
   const showPre  = em?.preMarketPrice  && (state === "PRE"  || state === "PREPRE");

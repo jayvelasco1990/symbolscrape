@@ -158,7 +158,7 @@ async function fetchExtendedMarket(symbol: string) {
     const fmtChange = (n: number) => `${n >= 0 ? "+" : ""}${fmt2(n)}`;
 
     return {
-      marketState: (q.marketState ?? "REGULAR") as string,
+      marketState: (q.marketState ?? "CLOSED") as string,
       regularPrice: q.regularMarketPrice != null ? fmt2(q.regularMarketPrice) : null,
       regularChange: q.regularMarketChange != null ? fmtChange(q.regularMarketChange) : null,
       regularChangePct: q.regularMarketChangePercent != null ? fmtPct(q.regularMarketChangePercent) : null,
