@@ -189,9 +189,9 @@ function PriceHeader({ data, price }: { data: QuoteData; price: string }) {
   const em = data.extendedMarket;
   const state = em?.marketState ?? "CLOSED";
 
-  // Determine which extended-hours block to show
-  const showPre  = em?.preMarketPrice  && (state === "PRE"  || state === "PREPRE");
-  const showPost = em?.postMarketPrice && (state === "POST" || state === "POSTPOST" || state === "CLOSED");
+  // Show whichever extended-hours data is available
+  const showPre  = !!em?.preMarketPrice;
+  const showPost = !!em?.postMarketPrice;
 
   const regularChange    = em?.regularChange    ?? data.priceChange ?? "";
   const regularChangePct = em?.regularChangePct ?? "";
