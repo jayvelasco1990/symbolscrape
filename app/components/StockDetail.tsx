@@ -206,8 +206,22 @@ function PriceHeader({ data, price }: { data: QuoteData; price: string }) {
   const displayPrice = em?.regularPrice ?? price;
   if (!displayPrice) return null;
 
+  const isOpen = state === "REGULAR";
+  const isPre  = state === "PRE" || state === "PREPRE";
+  const isPost   = state === "POST" || state === "POSTPOST";
+
+  const marketLabel = isOpen ? "Market Open" : isPre ? "Pre-Market" : isPost ? "After Hours" : "Market Closed";
+  const marketDot   = isOpen ? "bg-emerald-500" : isPre ? "bg-amber-400" : "bg-zinc-400";
+
   return (
     <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-black px-5 py-4">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs font-semibold tracking-widest text-zinc-400 uppercase">Current Price</p>
+        <span className="flex items-center gap-1.5 text-[10px] font-medium text-zinc-400">
+          <span className={`w-1.5 h-1.5 rounded-full ${marketDot} ${isOpen ? "animate-pulse" : ""}`} />
+          {marketLabel}
+        </span>
+      </div>
       <div className="flex items-end gap-3 flex-wrap">
         <span className="text-3xl font-bold text-zinc-900 dark:text-zinc-50 tabular-nums">
           ${displayPrice}
@@ -215,16 +229,6 @@ function PriceHeader({ data, price }: { data: QuoteData; price: string }) {
         {regularChange && (
           <span className={`text-sm font-medium tabular-nums mb-0.5 ${changeColor}`}>
             {regularChange}{regularChangePct ? ` (${regularChangePct})` : ""} today
-          </span>
-        )}
-        {state === "PRE" && (
-          <span className="text-[10px] font-semibold tracking-wide bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 px-2 py-0.5 rounded-full mb-0.5">
-            Pre-Market
-          </span>
-        )}
-        {(state === "POST" || state === "POSTPOST") && (
-          <span className="text-[10px] font-semibold tracking-wide bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 px-2 py-0.5 rounded-full mb-0.5">
-            After Hours
           </span>
         )}
       </div>
