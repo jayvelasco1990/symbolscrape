@@ -142,6 +142,44 @@ async function scrapeReuters(symbol: string) {
   return { price, description, financials };
 }
 
+async function fetchExtendedMarket(symbol: string) {
+  try {
+    const res = await fetch(
+      `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbol}&fields=regularMarketPrice,regularMarketChange,regularMarketChangePercent,preMarketPrice,preMarketChange,preMarketChangePercent,preMarketTime,postMarketPrice,postMarketChange,postMarketChangePercent,postMarketTime,marketState`,
+      { headers: { "User-Agent": HEADERS["User-Agent"] } }
+    );
+    if (!res.ok) return null;
+    const json = await res.json();
+    const q = json?.quoteResponse?.result?.[0];
+    if (!q) return null;
+
+    const fmt2 = (n: number) => n.toFixed(2);
+    const fmtPct = (n: number) => `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
+    const fmtChange = (n: number) => `${n >= 0 ? "+" : ""}${fmt2(n)}`;
+
+    return {
+      marketState: (q.marketState ?? "REGULAR") as string,
+      regularPrice: q.regularMarketPrice != null ? fmt2(q.regularMarketPrice) : null,
+      regularChange: q.regularMarketChange != null ? fmtChange(q.regularMarketChange) : null,
+      regularChangePct: q.regularMarketChangePercent != null ? fmtPct(q.regularMarketChangePercent) : null,
+      preMarketPrice: q.preMarketPrice != null ? fmt2(q.preMarketPrice) : null,
+      preMarketChange: q.preMarketChange != null ? fmtChange(q.preMarketChange) : null,
+      preMarketChangePct: q.preMarketChangePercent != null ? fmtPct(q.preMarketChangePercent) : null,
+      preMarketTime: q.preMarketTime != null
+        ? new Date(q.preMarketTime * 1000).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: "America/New_York" })
+        : null,
+      postMarketPrice: q.postMarketPrice != null ? fmt2(q.postMarketPrice) : null,
+      postMarketChange: q.postMarketChange != null ? fmtChange(q.postMarketChange) : null,
+      postMarketChangePct: q.postMarketChangePercent != null ? fmtPct(q.postMarketChangePercent) : null,
+      postMarketTime: q.postMarketTime != null
+        ? new Date(q.postMarketTime * 1000).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: "America/New_York" })
+        : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function scrapeFinviz(symbol: string) {
   const $ = await scrapePage(
     `https://finviz.com/quote.ashx?t=${symbol}`,
@@ -390,9 +428,10 @@ export async function GET(
   const { ticker } = await params;
   const symbol = ticker.toUpperCase();
 
-  const [reuters, finviz] = await Promise.all([
+  const [reuters, finviz, extendedMarket] = await Promise.all([
     scrapeReuters(symbol),
     scrapeFinviz(symbol),
+    fetchExtendedMarket(symbol),
   ]);
 
   const intrinsicValue  = calcIntrinsicValue(finviz?.stats ?? {});
@@ -428,6 +467,7 @@ export async function GET(
       description: finviz?.description || reuters.description,
       intrinsicValue, netCashPerShare,
       debtToRevenue, debtToEbitda, dividendMetrics,
+      extendedMarket,
       ...valuationExtras,
       ...quality,
     });
@@ -441,6 +481,7 @@ export async function GET(
       priceChange: "",
       intrinsicValue, netCashPerShare,
       debtToRevenue, debtToEbitda, dividendMetrics,
+      extendedMarket,
       ...valuationExtras,
       ...quality,
     });
@@ -456,6 +497,7 @@ export async function GET(
     dividendMetrics: null,
     debtToRevenue: "",
     debtToEbitda: "",
+    extendedMarket: null,
     ...valuationExtras,
     ...quality,
   });

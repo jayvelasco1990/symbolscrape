@@ -68,6 +68,20 @@ interface QuoteData {
     rule40: string;
     evToRevenue: string;
   } | null;
+  extendedMarket?: {
+    marketState: string;
+    regularPrice: string | null;
+    regularChange: string | null;
+    regularChangePct: string | null;
+    preMarketPrice: string | null;
+    preMarketChange: string | null;
+    preMarketChangePct: string | null;
+    preMarketTime: string | null;
+    postMarketPrice: string | null;
+    postMarketChange: string | null;
+    postMarketChangePct: string | null;
+    postMarketTime: string | null;
+  } | null;
 }
 
 // Format a raw number string for display: 37154298 → 37,154,298
@@ -171,6 +185,87 @@ function extractUnits(rows: TableRow[]): string | undefined {
   return unitCol ?? undefined;
 }
 
+function PriceHeader({ data, price }: { data: QuoteData; price: string }) {
+  const em = data.extendedMarket;
+  const state = em?.marketState ?? "REGULAR";
+
+  // Determine which extended-hours block to show
+  const showPre  = em?.preMarketPrice  && (state === "PRE"  || state === "PREPRE");
+  const showPost = em?.postMarketPrice && (state === "POST" || state === "POSTPOST" || state === "CLOSED");
+
+  const regularChange    = em?.regularChange    ?? data.priceChange ?? "";
+  const regularChangePct = em?.regularChangePct ?? "";
+  const isUp = regularChange.startsWith("+");
+  const isDown = regularChange.startsWith("-");
+  const changeColor = isUp
+    ? "text-emerald-600 dark:text-emerald-400"
+    : isDown
+    ? "text-red-500"
+    : "text-zinc-500";
+
+  const displayPrice = em?.regularPrice ?? price;
+  if (!displayPrice) return null;
+
+  return (
+    <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-black px-5 py-4">
+      <div className="flex items-end gap-3 flex-wrap">
+        <span className="text-3xl font-bold text-zinc-900 dark:text-zinc-50 tabular-nums">
+          ${displayPrice}
+        </span>
+        {regularChange && (
+          <span className={`text-sm font-medium tabular-nums mb-0.5 ${changeColor}`}>
+            {regularChange}{regularChangePct ? ` (${regularChangePct})` : ""} today
+          </span>
+        )}
+        {state === "PRE" && (
+          <span className="text-[10px] font-semibold tracking-wide bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 px-2 py-0.5 rounded-full mb-0.5">
+            Pre-Market
+          </span>
+        )}
+        {(state === "POST" || state === "POSTPOST") && (
+          <span className="text-[10px] font-semibold tracking-wide bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 px-2 py-0.5 rounded-full mb-0.5">
+            After Hours
+          </span>
+        )}
+      </div>
+
+      {showPre && (
+        <div className="mt-2 flex items-center gap-2 text-sm">
+          <span className="text-zinc-400 text-xs">Pre-market</span>
+          <span className="font-semibold text-zinc-900 dark:text-zinc-100 tabular-nums">
+            ${em!.preMarketPrice}
+          </span>
+          {em!.preMarketChange && (
+            <span className={`text-xs tabular-nums ${em!.preMarketChange.startsWith("+") ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}`}>
+              {em!.preMarketChange} ({em!.preMarketChangePct})
+            </span>
+          )}
+          {em!.preMarketTime && (
+            <span className="text-[10px] text-zinc-400 ml-1">as of {em!.preMarketTime}</span>
+          )}
+        </div>
+      )}
+
+      {showPost && (
+        <div className="mt-2 flex items-center gap-2 text-sm">
+          <span className="text-zinc-400 text-xs">After hours</span>
+          <span className="font-semibold text-zinc-900 dark:text-zinc-100 tabular-nums">
+            ${em!.postMarketPrice}
+          </span>
+          {em!.postMarketChange && (
+            <span className={`text-xs tabular-nums ${em!.postMarketChange.startsWith("+") ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}`}>
+              {em!.postMarketChange} ({em!.postMarketChangePct})
+            </span>
+          )}
+          {em!.postMarketTime && (
+            <span className="text-[10px] text-zinc-400 ml-1">as of {em!.postMarketTime}</span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function StockDetail({
   ticker,
   initialPrice,
@@ -220,6 +315,9 @@ export default function StockDetail({
 
   return (
     <div className="flex flex-col gap-3">
+
+      {/* ── Price Header ────────────────────────────── */}
+      <PriceHeader data={data} price={price} />
 
       {/* ── Price Chart ─────────────────────────────── */}
       <PriceChart ticker={ticker} />
