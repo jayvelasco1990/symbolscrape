@@ -233,6 +233,12 @@ function PriceHeader({ data, price }: { data: QuoteData; price: string }) {
         )}
       </div>
 
+      {!showPre && !showPost && (state === "CLOSED") && (
+        <p className="text-[10px] text-zinc-400 mt-2">
+          Extended hours data not available — pre-market begins weekdays from 4:00 AM ET
+        </p>
+      )}
+
       {showPre && (
         <div className="mt-2 flex items-center gap-2 text-sm">
           <span className="text-zinc-400 text-xs">Pre-market</span>
