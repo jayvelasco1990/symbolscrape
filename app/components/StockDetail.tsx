@@ -14,6 +14,7 @@ import DividendMetrics from "./DividendMetrics";
 import DisruptionRisk from "./DisruptionRisk";
 import BusinessQuality from "./BusinessQuality";
 import GrowthMetrics from "./GrowthMetrics";
+import MungerMetrics from "./MungerMetrics";
 import PriceChart from "./PriceChart";
 
 type TableRow = Record<string, string>;
@@ -67,6 +68,15 @@ interface QuoteData {
     fcfMarginPct: string;
     rule40: string;
     evToRevenue: string;
+  } | null;
+  mungerMetrics?: {
+    fcfConversion: { pct: string; label: "Excellent" | "Good" | "Moderate" | "Weak" } | null;
+    capitalIntensity: string | null;
+    capitalIntensityLabel: string | null;
+    earningsConsistency: string | null;
+    consistencyYears: number;
+    avgRoe: string | null;
+    avgMargin: string | null;
   } | null;
   extendedMarket?: {
     marketState: string;
@@ -378,6 +388,14 @@ export default function StockDetail({
         <>
           <SectionLabel>Business Quality</SectionLabel>
           <BusinessQuality moat={data.moatQuality} insider={data.insiderActivity} />
+        </>
+      )}
+
+      {/* ── Munger Quality ──────────────────────────── */}
+      {data.mungerMetrics && (data.mungerMetrics.fcfConversion || data.mungerMetrics.capitalIntensity || data.mungerMetrics.earningsConsistency) && (
+        <>
+          <SectionLabel>Munger Quality</SectionLabel>
+          <MungerMetrics data={data.mungerMetrics} />
         </>
       )}
 

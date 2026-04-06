@@ -439,6 +439,98 @@ function calcIntrinsicValue(stats: Record<string, string>) {
   };
 }
 
+function calcFCFConversion(stats: Record<string, string>) {
+  const parseVal = (s: string) => parseFloat(s.replace(/[^0-9.-]/g, "")) || 0;
+  const price = parseVal(stats["Price"]      ?? "");
+  const pfcf  = parseVal(stats["P/FCF"]      ?? "");
+  const eps   = parseVal(stats["EPS (ttm)"]  ?? "");
+  if (!price || !pfcf || !eps || eps <= 0) return null;
+  const fcfPerShare = price / pfcf;
+  const pct = (fcfPerShare / eps) * 100;
+  const label =
+    pct >= 100 ? "Excellent" :
+    pct >= 80  ? "Good"      :
+    pct >= 60  ? "Moderate"  : "Weak";
+  return { pct: pct.toFixed(0), label };
+}
+
+async function fetchYahooFinancials(symbol: string) {
+  try {
+    const res = await fetch(
+      `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=incomeStatementHistory,cashflowStatementHistory,balanceSheetHistory`,
+      { headers: { "User-Agent": HEADERS["User-Agent"] } }
+    );
+    if (!res.ok) return null;
+    const json = await res.json();
+    const r = json?.quoteSummary?.result?.[0];
+    if (!r) return null;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const raw = (field: any) => field?.raw ?? null;
+
+    const income   = r.incomeStatementHistory?.incomeStatementHistory  ?? [];
+    const cashflow = r.cashflowStatementHistory?.cashflowStatements    ?? [];
+    const balance  = r.balanceSheetHistory?.balanceSheetStatements     ?? [];
+
+    // Capital intensity: |CapEx| / Revenue (most recent annual)
+    let capitalIntensity: string | null = null;
+    let capitalIntensityLabel: string | null = null;
+    if (income[0] && cashflow[0]) {
+      const revenue = raw(income[0].totalRevenue);
+      const capex   = raw(cashflow[0].capitalExpenditures);
+      if (revenue > 0 && capex != null) {
+        const pct = (Math.abs(capex) / revenue) * 100;
+        capitalIntensity = pct.toFixed(1);
+        capitalIntensityLabel = pct < 3 ? "Asset-light" : pct < 10 ? "Moderate" : "Capital-heavy";
+      }
+    }
+
+    // Earnings consistency: coefficient of variation of ROE + net margin over up to 4 years
+    const years = Math.min(income.length, balance.length, 4);
+    let earningsConsistency: string | null = null;
+    let consistencyYears = 0;
+    let avgRoe: string | null = null;
+    let avgMargin: string | null = null;
+
+    if (years >= 2) {
+      const roes: number[] = [];
+      const margins: number[] = [];
+      for (let i = 0; i < years; i++) {
+        const revenue   = raw(income[i]?.totalRevenue);
+        const netIncome = raw(income[i]?.netIncome);
+        const equity    = raw(balance[i]?.totalStockholderEquity);
+        if (revenue > 0 && netIncome != null) margins.push((netIncome / revenue) * 100);
+        if (equity  > 0 && netIncome != null) roes.push((netIncome / equity) * 100);
+      }
+
+      const cv = (arr: number[]) => {
+        if (arr.length < 2) return null;
+        const mean = arr.reduce((a, b) => a + b, 0) / arr.length;
+        if (Math.abs(mean) < 0.5) return null;
+        const std = Math.sqrt(arr.reduce((a, b) => a + (b - mean) ** 2, 0) / arr.length);
+        return std / Math.abs(mean);
+      };
+
+      const roeCv = cv(roes);
+      const marginCv = cv(margins);
+      const combined =
+        roeCv != null && marginCv != null ? (roeCv + marginCv) / 2 :
+        roeCv ?? marginCv;
+
+      if (combined != null) {
+        earningsConsistency = combined < 0.15 ? "High" : combined < 0.35 ? "Moderate" : "Low";
+        consistencyYears    = years;
+        avgRoe    = roes.length    ? (roes.reduce((a, b)    => a + b, 0) / roes.length).toFixed(1)    : null;
+        avgMargin = margins.length ? (margins.reduce((a, b) => a + b, 0) / margins.length).toFixed(1) : null;
+      }
+    }
+
+    return { capitalIntensity, capitalIntensityLabel, earningsConsistency, consistencyYears, avgRoe, avgMargin };
+  } catch {
+    return null;
+  }
+}
+
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ ticker: string }> }
@@ -446,10 +538,11 @@ export async function GET(
   const { ticker } = await params;
   const symbol = ticker.toUpperCase();
 
-  const [reuters, finviz, extendedMarket] = await Promise.all([
+  const [reuters, finviz, extendedMarket, yahooFin] = await Promise.all([
     scrapeReuters(symbol),
     scrapeFinviz(symbol),
     fetchExtendedMarket(symbol),
+    fetchYahooFinancials(symbol),
   ]);
 
   const intrinsicValue  = calcIntrinsicValue(finviz?.stats ?? {});
@@ -474,6 +567,17 @@ export async function GET(
     reuters.financials.balanceSheet.length ||
     reuters.financials.cashFlow.length;
 
+  const fcfConversion = calcFCFConversion(finviz?.stats ?? {});
+  const mungerMetrics = {
+    fcfConversion,
+    capitalIntensity:      yahooFin?.capitalIntensity      ?? null,
+    capitalIntensityLabel: yahooFin?.capitalIntensityLabel ?? null,
+    earningsConsistency:   yahooFin?.earningsConsistency   ?? null,
+    consistencyYears:      yahooFin?.consistencyYears      ?? 0,
+    avgRoe:                yahooFin?.avgRoe                ?? null,
+    avgMargin:             yahooFin?.avgMargin             ?? null,
+  };
+
   const quality = { moatQuality, insiderActivity, riskProfile, rateSensitivity, growthMetrics };
   const valuationExtras = { evEbitda, fcfYield, sector: finviz?.sector ?? "" };
 
@@ -485,7 +589,7 @@ export async function GET(
       description: finviz?.description || reuters.description,
       intrinsicValue, netCashPerShare,
       debtToRevenue, debtToEbitda, dividendMetrics,
-      extendedMarket,
+      extendedMarket, mungerMetrics,
       ...valuationExtras,
       ...quality,
     });
@@ -499,7 +603,7 @@ export async function GET(
       priceChange: "",
       intrinsicValue, netCashPerShare,
       debtToRevenue, debtToEbitda, dividendMetrics,
-      extendedMarket,
+      extendedMarket, mungerMetrics,
       ...valuationExtras,
       ...quality,
     });
@@ -516,6 +620,7 @@ export async function GET(
     debtToRevenue: "",
     debtToEbitda: "",
     extendedMarket: null,
+    mungerMetrics: null,
     ...valuationExtras,
     ...quality,
   });
