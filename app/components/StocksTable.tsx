@@ -129,7 +129,7 @@ export default function StocksTable({ screener, page, dividend, rsi, beta, sort,
 
       if (h === "Ticker") {
         const price = info.row.original["Price"] ?? "";
-        const back = encodeURIComponent(`/screener?tab=${screener}&page=${page}&dividend=${dividend}&rsi=${rsi}&beta=${beta}`);
+        const back = encodeURIComponent(`/screener?tab=${screener}&page=${page}&dividend=${dividend}&rsi=${rsi}&beta=${beta}&sort=${sort}`);
         const href = `/stocks/${value}?price=${encodeURIComponent(price)}&back=${back}`;
         return (
           <Link
