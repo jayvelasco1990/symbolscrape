@@ -460,10 +460,16 @@ async function fetchYahooFinancials(symbol: string) {
       `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=incomeStatementHistory,cashflowStatementHistory,balanceSheetHistory`,
       { headers: { "User-Agent": HEADERS["User-Agent"] } }
     );
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.error(`[yahooFin] ${symbol} HTTP ${res.status}`);
+      return null;
+    }
     const json = await res.json();
     const r = json?.quoteSummary?.result?.[0];
-    if (!r) return null;
+    if (!r) {
+      console.error(`[yahooFin] ${symbol} no result:`, JSON.stringify(json).slice(0, 400));
+      return null;
+    }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const raw = (field: any) => field?.raw ?? null;
@@ -471,6 +477,7 @@ async function fetchYahooFinancials(symbol: string) {
     const income   = r.incomeStatementHistory?.incomeStatementHistory  ?? [];
     const cashflow = r.cashflowStatementHistory?.cashflowStatements    ?? [];
     const balance  = r.balanceSheetHistory?.balanceSheetStatements     ?? [];
+    console.log(`[yahooFin] ${symbol} rows — income:${income.length} cashflow:${cashflow.length} balance:${balance.length}`);
 
     // Capital intensity: |CapEx| / Revenue (most recent annual)
     let capitalIntensity: string | null = null;
