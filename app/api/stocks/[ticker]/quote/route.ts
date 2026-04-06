@@ -454,61 +454,108 @@ function calcFCFConversion(stats: Record<string, string>) {
   return { pct: pct.toFixed(0), label };
 }
 
-async function fetchYahooFinancials(symbol: string) {
-  console.log(`[yahooFin] fetching ${symbol}`);
-  try {
-    const res = await fetch(
-      `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=incomeStatementHistory,cashflowStatementHistory,balanceSheetHistory`,
-      { headers: { "User-Agent": HEADERS["User-Agent"] } }
-    );
-    if (!res.ok) {
-      console.error(`[yahooFin] ${symbol} HTTP ${res.status}`);
-      return null;
+function calcMungerFromFinancials(
+  incomeStatement: Record<string, string>[],
+  cashFlow: Record<string, string>[],
+  balanceSheet: Record<string, string>[]
+) {
+  // Find the label column (mostly non-numeric values)
+  function getLabelCol(rows: Record<string, string>[]): string | null {
+    if (!rows.length) return null;
+    for (const h of Object.keys(rows[0])) {
+      const vals = rows.map((r) => r[h] ?? "").filter(Boolean);
+      const numCount = vals.filter((v) => !isNaN(Number(v.replace(/,/g, "")))).length;
+      if (numCount < vals.length / 2) return h;
     }
-    const json = await res.json();
-    const r = json?.quoteSummary?.result?.[0];
-    if (!r) {
-      console.error(`[yahooFin] ${symbol} no result:`, JSON.stringify(json).slice(0, 400));
-      return null;
+    return null;
+  }
+
+  function getYearCols(rows: Record<string, string>[], labelCol: string): string[] {
+    if (!rows.length) return [];
+    return Object.keys(rows[0]).filter((k) => k !== labelCol);
+  }
+
+  function findRow(rows: Record<string, string>[], labelCol: string, patterns: string[]): Record<string, string> | null {
+    for (const row of rows) {
+      const label = (row[labelCol] ?? "").toLowerCase();
+      if (patterns.some((p) => label.includes(p))) return row;
     }
+    return null;
+  }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const raw = (field: any) => field?.raw ?? null;
+  // Parse values that may be abbreviated (37.2B, 5.1M) or plain numbers
+  function parseN(s: string | undefined): number | null {
+    if (!s || s === "-" || s === "—" || s.trim() === "") return null;
+    const clean = s.replace(/,/g, "").trim();
+    const m = clean.match(/^-?([\d.]+)([BMK]?)$/i);
+    if (!m) return null;
+    let n = parseFloat(m[1]);
+    if (clean.startsWith("-")) n = -n;
+    if (m[2].toUpperCase() === "B") n *= 1e9;
+    if (m[2].toUpperCase() === "M") n *= 1e6;
+    if (m[2].toUpperCase() === "K") n *= 1e3;
+    return isNaN(n) ? null : n;
+  }
 
-    const income   = r.incomeStatementHistory?.incomeStatementHistory  ?? [];
-    const cashflow = r.cashflowStatementHistory?.cashflowStatements    ?? [];
-    const balance  = r.balanceSheetHistory?.balanceSheetStatements     ?? [];
-    console.log(`[yahooFin] ${symbol} rows — income:${income.length} cashflow:${cashflow.length} balance:${balance.length}`);
+  const incCol = getLabelCol(incomeStatement);
+  const cfCol  = getLabelCol(cashFlow);
+  const bsCol  = getLabelCol(balanceSheet);
 
-    // Capital intensity: |CapEx| / Revenue (most recent annual)
-    let capitalIntensity: string | null = null;
-    let capitalIntensityLabel: string | null = null;
-    if (income[0] && cashflow[0]) {
-      const revenue = raw(income[0].totalRevenue);
-      const capex   = raw(cashflow[0].capitalExpenditures);
-      if (revenue > 0 && capex != null) {
-        const pct = (Math.abs(capex) / revenue) * 100;
-        capitalIntensity = pct.toFixed(1);
-        capitalIntensityLabel = pct < 3 ? "Asset-light" : pct < 10 ? "Moderate" : "Capital-heavy";
+  // ── Capital Intensity: |CapEx| / Revenue ──────────────────────────
+  let capitalIntensity: string | null = null;
+  let capitalIntensityLabel: string | null = null;
+
+  if (incCol && cfCol) {
+    const revRow   = findRow(incomeStatement, incCol, ["total revenue", "net revenue", "revenue", "sales"]);
+    const capexRow = findRow(cashFlow, cfCol, ["capital expenditure", "purchase of property", "purchases of property", "capex", "property, plant"]);
+
+    if (revRow && capexRow) {
+      const revCols  = getYearCols(incomeStatement, incCol);
+      const cfCols   = getYearCols(cashFlow, cfCol);
+      // Try each pair of columns (most recent is typically first or last)
+      outer: for (const rc of [revCols[0], revCols[revCols.length - 1]]) {
+        for (const cc of [cfCols[0], cfCols[cfCols.length - 1]]) {
+          const rev   = parseN(revRow[rc]);
+          const capex = parseN(capexRow[cc]);
+          if (rev && Math.abs(rev) > 0 && capex != null) {
+            const pct = (Math.abs(capex) / Math.abs(rev)) * 100;
+            if (pct > 0 && pct < 80) {
+              capitalIntensity      = pct.toFixed(1);
+              capitalIntensityLabel = pct < 3 ? "Asset-light" : pct < 10 ? "Moderate" : "Capital-heavy";
+              break outer;
+            }
+          }
+        }
       }
     }
+  }
 
-    // Earnings consistency: coefficient of variation of ROE + net margin over up to 4 years
-    const years = Math.min(income.length, balance.length, 4);
-    let earningsConsistency: string | null = null;
-    let consistencyYears = 0;
-    let avgRoe: string | null = null;
-    let avgMargin: string | null = null;
+  // ── Earnings Consistency: CV of net margin (+ ROE if balance sheet available) ──
+  let earningsConsistency: string | null = null;
+  let consistencyYears = 0;
+  let avgRoe: string | null = null;
+  let avgMargin: string | null = null;
 
-    if (years >= 2) {
-      const roes: number[] = [];
+  if (incCol) {
+    const revRow = findRow(incomeStatement, incCol, ["total revenue", "net revenue", "revenue", "sales"]);
+    const niRow  = findRow(incomeStatement, incCol, ["net income", "net profit", "net earnings"]);
+
+    if (revRow && niRow) {
+      const yearCols = getYearCols(incomeStatement, incCol);
+      const equityRow = bsCol ? findRow(balanceSheet, bsCol, ["total stockholder", "stockholders equity", "shareholders equity", "total equity"]) : null;
+      const bsYearCols = bsCol ? getYearCols(balanceSheet, bsCol) : [];
+
       const margins: number[] = [];
-      for (let i = 0; i < years; i++) {
-        const revenue   = raw(income[i]?.totalRevenue);
-        const netIncome = raw(income[i]?.netIncome);
-        const equity    = raw(balance[i]?.totalStockholderEquity);
-        if (revenue > 0 && netIncome != null) margins.push((netIncome / revenue) * 100);
-        if (equity  > 0 && netIncome != null) roes.push((netIncome / equity) * 100);
+      const roes: number[] = [];
+
+      for (let i = 0; i < Math.min(yearCols.length, 5); i++) {
+        const rev = parseN(revRow[yearCols[i]]);
+        const ni  = parseN(niRow[yearCols[i]]);
+        if (rev && Math.abs(rev) > 0 && ni != null) margins.push((ni / Math.abs(rev)) * 100);
+        if (equityRow && bsYearCols[i]) {
+          const eq = parseN(equityRow[bsYearCols[i]]);
+          if (eq && eq > 0 && ni != null) roes.push((ni / eq) * 100);
+        }
       }
 
       const cv = (arr: number[]) => {
@@ -519,25 +566,20 @@ async function fetchYahooFinancials(symbol: string) {
         return std / Math.abs(mean);
       };
 
-      const roeCv = cv(roes);
       const marginCv = cv(margins);
-      const combined =
-        roeCv != null && marginCv != null ? (roeCv + marginCv) / 2 :
-        roeCv ?? marginCv;
+      const roeCv    = cv(roes);
+      const combined = marginCv != null && roeCv != null ? (marginCv + roeCv) / 2 : marginCv ?? roeCv;
 
-      if (combined != null) {
+      if (combined != null && margins.length >= 2) {
         earningsConsistency = combined < 0.15 ? "High" : combined < 0.35 ? "Moderate" : "Low";
-        consistencyYears    = years;
-        avgRoe    = roes.length    ? (roes.reduce((a, b)    => a + b, 0) / roes.length).toFixed(1)    : null;
-        avgMargin = margins.length ? (margins.reduce((a, b) => a + b, 0) / margins.length).toFixed(1) : null;
+        consistencyYears    = margins.length;
+        avgMargin = (margins.reduce((a, b) => a + b, 0) / margins.length).toFixed(1);
+        if (roes.length >= 2) avgRoe = (roes.reduce((a, b) => a + b, 0) / roes.length).toFixed(1);
       }
     }
-
-    return { capitalIntensity, capitalIntensityLabel, earningsConsistency, consistencyYears, avgRoe, avgMargin };
-  } catch (e) {
-    console.error(`[yahooFin] ${symbol} exception:`, e);
-    return null;
   }
+
+  return { capitalIntensity, capitalIntensityLabel, earningsConsistency, consistencyYears, avgRoe, avgMargin };
 }
 
 export async function GET(
@@ -547,11 +589,10 @@ export async function GET(
   const { ticker } = await params;
   const symbol = ticker.toUpperCase();
 
-  const [reuters, finviz, extendedMarket, yahooFin] = await Promise.all([
+  const [reuters, finviz, extendedMarket] = await Promise.all([
     scrapeReuters(symbol),
     scrapeFinviz(symbol),
     fetchExtendedMarket(symbol),
-    fetchYahooFinancials(symbol),
   ]);
 
   const intrinsicValue  = calcIntrinsicValue(finviz?.stats ?? {});
@@ -577,14 +618,19 @@ export async function GET(
     reuters.financials.cashFlow.length;
 
   const fcfConversion = calcFCFConversion(finviz?.stats ?? {});
+  const yahooFin = calcMungerFromFinancials(
+    reuters.financials.incomeStatement,
+    reuters.financials.cashFlow,
+    reuters.financials.balanceSheet,
+  );
   const mungerMetrics = {
     fcfConversion,
-    capitalIntensity:      yahooFin?.capitalIntensity      ?? null,
-    capitalIntensityLabel: yahooFin?.capitalIntensityLabel ?? null,
-    earningsConsistency:   yahooFin?.earningsConsistency   ?? null,
-    consistencyYears:      yahooFin?.consistencyYears      ?? 0,
-    avgRoe:                yahooFin?.avgRoe                ?? null,
-    avgMargin:             yahooFin?.avgMargin             ?? null,
+    capitalIntensity:      yahooFin.capitalIntensity,
+    capitalIntensityLabel: yahooFin.capitalIntensityLabel,
+    earningsConsistency:   yahooFin.earningsConsistency,
+    consistencyYears:      yahooFin.consistencyYears,
+    avgRoe:                yahooFin.avgRoe,
+    avgMargin:             yahooFin.avgMargin,
   };
 
   const quality = { moatQuality, insiderActivity, riskProfile, rateSensitivity, growthMetrics };
