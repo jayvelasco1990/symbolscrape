@@ -455,6 +455,7 @@ function calcFCFConversion(stats: Record<string, string>) {
 }
 
 async function fetchYahooFinancials(symbol: string) {
+  console.log(`[yahooFin] fetching ${symbol}`);
   try {
     const res = await fetch(
       `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=incomeStatementHistory,cashflowStatementHistory,balanceSheetHistory`,
@@ -533,7 +534,8 @@ async function fetchYahooFinancials(symbol: string) {
     }
 
     return { capitalIntensity, capitalIntensityLabel, earningsConsistency, consistencyYears, avgRoe, avgMargin };
-  } catch {
+  } catch (e) {
+    console.error(`[yahooFin] ${symbol} exception:`, e);
     return null;
   }
 }
