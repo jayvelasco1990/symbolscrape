@@ -617,9 +617,13 @@ export async function GET(
     reuters.financials.balanceSheet.length ||
     reuters.financials.cashFlow.length;
 
-  console.log(`[munger] income rows:${reuters.financials.incomeStatement.length} cf rows:${reuters.financials.cashFlow.length} bs rows:${reuters.financials.balanceSheet.length}`);
-  if (reuters.financials.incomeStatement.length) console.log(`[munger] income sample:`, JSON.stringify(reuters.financials.incomeStatement[0]).slice(0, 300));
-  if (reuters.financials.cashFlow.length) console.log(`[munger] cf sample:`, JSON.stringify(reuters.financials.cashFlow[0]).slice(0, 300));
+  const _mungerDebug = {
+    incomeRows: reuters.financials.incomeStatement.length,
+    cfRows: reuters.financials.cashFlow.length,
+    bsRows: reuters.financials.balanceSheet.length,
+    incomeSample: reuters.financials.incomeStatement[0] ?? null,
+    cfSample: reuters.financials.cashFlow[0] ?? null,
+  };
 
   const fcfConversion = calcFCFConversion(finviz?.stats ?? {});
   const yahooFin = calcMungerFromFinancials(
@@ -648,7 +652,7 @@ export async function GET(
       description: finviz?.description || reuters.description,
       intrinsicValue, netCashPerShare,
       debtToRevenue, debtToEbitda, dividendMetrics,
-      extendedMarket, mungerMetrics,
+      extendedMarket, mungerMetrics, _mungerDebug,
       ...valuationExtras,
       ...quality,
     });
@@ -662,7 +666,7 @@ export async function GET(
       priceChange: "",
       intrinsicValue, netCashPerShare,
       debtToRevenue, debtToEbitda, dividendMetrics,
-      extendedMarket, mungerMetrics,
+      extendedMarket, mungerMetrics, _mungerDebug,
       ...valuationExtras,
       ...quality,
     });
