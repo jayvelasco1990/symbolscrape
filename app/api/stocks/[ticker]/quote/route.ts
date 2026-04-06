@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as cheerio from "cheerio";
 import { computeRiskProfile, computeRateSensitivity } from "@/lib/riskScores";
+import { getDb } from "@/lib/db";
 
 const HEADERS = {
   "User-Agent":
@@ -454,132 +455,152 @@ function calcFCFConversion(stats: Record<string, string>) {
   return { pct: pct.toFixed(0), label };
 }
 
-function calcMungerFromFinancials(
-  incomeStatement: Record<string, string>[],
-  cashFlow: Record<string, string>[],
-  balanceSheet: Record<string, string>[]
-) {
-  // Find the label column (mostly non-numeric values)
-  function getLabelCol(rows: Record<string, string>[]): string | null {
-    if (!rows.length) return null;
-    for (const h of Object.keys(rows[0])) {
-      const vals = rows.map((r) => r[h] ?? "").filter(Boolean);
-      const numCount = vals.filter((v) => !isNaN(Number(v.replace(/,/g, "")))).length;
-      if (numCount < vals.length / 2) return h;
-    }
-    return null;
+const SEC_UA  = "vpfund-app/1.0 research@vpfund.example.com";
+const SEC_TTL = 24 * 60 * 60 * 1000; // 24 hours
+
+async function fetchSecMungerData(symbol: string) {
+  const db = getDb();
+
+  // Serve from cache if fresh
+  const cached = db
+    .prepare("SELECT * FROM sec_cache WHERE ticker = ?")
+    .get(symbol) as Record<string, string | number> | undefined;
+  if (cached && Date.now() - new Date((cached.fetched_at as string) + "Z").getTime() < SEC_TTL) {
+    return {
+      capitalIntensity:      cached.capital_intensity      != null ? (cached.capital_intensity as number).toFixed(1) : null,
+      capitalIntensityLabel: (cached.capital_intensity_label as string) ?? null,
+      earningsConsistency:   (cached.earnings_consistency  as string) ?? null,
+      consistencyYears:      (cached.consistency_years     as number) ?? 0,
+      avgRoe:                cached.avg_roe   != null ? (cached.avg_roe   as number).toFixed(1) : null,
+      avgMargin:             cached.avg_margin != null ? (cached.avg_margin as number).toFixed(1) : null,
+    };
   }
 
-  function getYearCols(rows: Record<string, string>[], labelCol: string): string[] {
-    if (!rows.length) return [];
-    return Object.keys(rows[0]).filter((k) => k !== labelCol);
-  }
+  try {
+    // Step 1: CIK lookup via SEC EDGAR
+    const cikRes = await fetch(
+      `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${symbol}&type=10-K&dateb=&owner=include&count=1&output=atom`,
+      { headers: { "User-Agent": SEC_UA } }
+    );
+    if (!cikRes.ok) return null;
+    const cikXml  = await cikRes.text();
+    const cikMatch = cikXml.match(/CIK=(\d+)/);
+    if (!cikMatch) return null;
+    const cik = cikMatch[1].padStart(10, "0");
 
-  function findRow(rows: Record<string, string>[], labelCol: string, patterns: string[]): Record<string, string> | null {
-    for (const row of rows) {
-      const label = (row[labelCol] ?? "").toLowerCase();
-      if (patterns.some((p) => label.includes(p))) return row;
-    }
-    return null;
-  }
+    // Step 2: Company facts (XBRL)
+    const factsRes = await fetch(
+      `https://data.sec.gov/api/xbrl/companyfacts/CIK${cik}.json`,
+      { headers: { "User-Agent": SEC_UA } }
+    );
+    if (!factsRes.ok) return null;
+    const facts = await factsRes.json();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const gaap = (facts as any)?.facts?.["us-gaap"] ?? {};
 
-  // Parse values that may be abbreviated (37.2B, 5.1M) or plain numbers
-  function parseN(s: string | undefined): number | null {
-    if (!s || s === "-" || s === "—" || s.trim() === "") return null;
-    const clean = s.replace(/,/g, "").trim();
-    const m = clean.match(/^-?([\d.]+)([BMK]?)$/i);
-    if (!m) return null;
-    let n = parseFloat(m[1]);
-    if (clean.startsWith("-")) n = -n;
-    if (m[2].toUpperCase() === "B") n *= 1e9;
-    if (m[2].toUpperCase() === "M") n *= 1e6;
-    if (m[2].toUpperCase() === "K") n *= 1e3;
-    return isNaN(n) ? null : n;
-  }
-
-  const incCol = getLabelCol(incomeStatement);
-  const cfCol  = getLabelCol(cashFlow);
-  const bsCol  = getLabelCol(balanceSheet);
-
-  // ── Capital Intensity: |CapEx| / Revenue ──────────────────────────
-  let capitalIntensity: string | null = null;
-  let capitalIntensityLabel: string | null = null;
-
-  if (incCol && cfCol) {
-    const revRow   = findRow(incomeStatement, incCol, ["total revenue", "net revenue", "revenue", "sales"]);
-    const capexRow = findRow(cashFlow, cfCol, ["capital expenditure", "purchase of property", "purchases of property", "capex", "property, plant"]);
-
-    if (revRow && capexRow) {
-      const revCols  = getYearCols(incomeStatement, incCol);
-      const cfCols   = getYearCols(cashFlow, cfCol);
-      // Try each pair of columns (most recent is typically first or last)
-      outer: for (const rc of [revCols[0], revCols[revCols.length - 1]]) {
-        for (const cc of [cfCols[0], cfCols[cfCols.length - 1]]) {
-          const rev   = parseN(revRow[rc]);
-          const capex = parseN(capexRow[cc]);
-          if (rev && Math.abs(rev) > 0 && capex != null) {
-            const pct = (Math.abs(capex) / Math.abs(rev)) * 100;
-            if (pct > 0 && pct < 80) {
-              capitalIntensity      = pct.toFixed(1);
-              capitalIntensityLabel = pct < 3 ? "Asset-light" : pct < 10 ? "Moderate" : "Capital-heavy";
-              break outer;
-            }
-          }
+    // Extract deduplicated annual values for a concept
+    function getAnnual(concept: string): { end: string; val: number }[] {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const entries: any[] = gaap[concept]?.units?.USD ?? [];
+      const map = new Map<string, { end: string; val: number; filed: string }>();
+      for (const e of entries) {
+        if (e.fp === "FY" && e.form === "10-K" && e.val != null) {
+          const ex = map.get(e.end);
+          if (!ex || e.filed > ex.filed) map.set(e.end, { end: e.end, val: e.val, filed: e.filed });
         }
       }
+      return [...map.values()].sort((a, b) => b.end.localeCompare(a.end)).slice(0, 5);
     }
-  }
 
-  // ── Earnings Consistency: CV of net margin (+ ROE if balance sheet available) ──
-  let earningsConsistency: string | null = null;
-  let consistencyYears = 0;
-  let avgRoe: string | null = null;
-  let avgMargin: string | null = null;
+    const capexData = getAnnual("PaymentsToAcquirePropertyPlantAndEquipment");
+    let revData: { end: string; val: number }[] = [];
+    for (const tag of [
+      "RevenueFromContractWithCustomerExcludingAssessedTax",
+      "Revenues", "SalesRevenueNet",
+      "RevenueFromContractWithCustomerIncludingAssessedTax",
+    ]) {
+      revData = getAnnual(tag);
+      if (revData.length) break;
+    }
+    const niData  = getAnnual("NetIncomeLoss");
+    const eqData  = getAnnual("StockholdersEquity");
 
-  if (incCol) {
-    const revRow = findRow(incomeStatement, incCol, ["total revenue", "net revenue", "revenue", "sales"]);
-    const niRow  = findRow(incomeStatement, incCol, ["net income", "net profit", "net earnings"]);
-
-    if (revRow && niRow) {
-      const yearCols = getYearCols(incomeStatement, incCol);
-      const equityRow = bsCol ? findRow(balanceSheet, bsCol, ["total stockholder", "stockholders equity", "shareholders equity", "total equity"]) : null;
-      const bsYearCols = bsCol ? getYearCols(balanceSheet, bsCol) : [];
-
-      const margins: number[] = [];
-      const roes: number[] = [];
-
-      for (let i = 0; i < Math.min(yearCols.length, 5); i++) {
-        const rev = parseN(revRow[yearCols[i]]);
-        const ni  = parseN(niRow[yearCols[i]]);
-        if (rev && Math.abs(rev) > 0 && ni != null) margins.push((ni / Math.abs(rev)) * 100);
-        if (equityRow && bsYearCols[i]) {
-          const eq = parseN(equityRow[bsYearCols[i]]);
-          if (eq && eq > 0 && ni != null) roes.push((ni / eq) * 100);
-        }
-      }
-
-      const cv = (arr: number[]) => {
-        if (arr.length < 2) return null;
-        const mean = arr.reduce((a, b) => a + b, 0) / arr.length;
-        if (Math.abs(mean) < 0.5) return null;
-        const std = Math.sqrt(arr.reduce((a, b) => a + (b - mean) ** 2, 0) / arr.length);
-        return std / Math.abs(mean);
-      };
-
-      const marginCv = cv(margins);
-      const roeCv    = cv(roes);
-      const combined = marginCv != null && roeCv != null ? (marginCv + roeCv) / 2 : marginCv ?? roeCv;
-
-      if (combined != null && margins.length >= 2) {
-        earningsConsistency = combined < 0.15 ? "High" : combined < 0.35 ? "Moderate" : "Low";
-        consistencyYears    = margins.length;
-        avgMargin = (margins.reduce((a, b) => a + b, 0) / margins.length).toFixed(1);
-        if (roes.length >= 2) avgRoe = (roes.reduce((a, b) => a + b, 0) / roes.length).toFixed(1);
+    // Capital Intensity: |CapEx| / Revenue (most recent annual)
+    let capitalIntensity: number | null = null;
+    let capitalIntensityLabel: string | null = null;
+    if (capexData.length && revData.length) {
+      const pct = (Math.abs(capexData[0].val) / revData[0].val) * 100;
+      if (pct > 0 && pct < 80) {
+        capitalIntensity      = parseFloat(pct.toFixed(1));
+        capitalIntensityLabel = pct < 3 ? "Asset-light" : pct < 10 ? "Moderate" : "Capital-heavy";
       }
     }
-  }
 
-  return { capitalIntensity, capitalIntensityLabel, earningsConsistency, consistencyYears, avgRoe, avgMargin };
+    // Earnings Consistency: CV of net margin + ROE over up to 4 years
+    const revMap = new Map(revData.map((d) => [d.end, d.val]));
+    const eqMap  = new Map(eqData.map((d) => [d.end, d.val]));
+    const margins: number[] = [];
+    const roes:    number[] = [];
+
+    for (const ni of niData.slice(0, 4)) {
+      const rev = revMap.get(ni.end);
+      const eq  = eqMap.get(ni.end);
+      if (rev && rev > 0) margins.push((ni.val / rev) * 100);
+      if (eq  && eq  > 0) roes.push((ni.val / eq) * 100);
+    }
+
+    const cv = (arr: number[]) => {
+      if (arr.length < 2) return null;
+      const mean = arr.reduce((a, b) => a + b, 0) / arr.length;
+      if (Math.abs(mean) < 0.5) return null;
+      const std = Math.sqrt(arr.reduce((a, b) => a + (b - mean) ** 2, 0) / arr.length);
+      return std / Math.abs(mean);
+    };
+
+    let earningsConsistency: string | null = null;
+    let consistencyYears = 0;
+    let avgRoe: number | null = null;
+    let avgMargin: number | null = null;
+
+    const combined = (() => {
+      const mc = cv(margins); const rc = cv(roes);
+      return mc != null && rc != null ? (mc + rc) / 2 : mc ?? rc;
+    })();
+
+    if (combined != null && margins.length >= 2) {
+      earningsConsistency = combined < 0.15 ? "High" : combined < 0.35 ? "Moderate" : "Low";
+      consistencyYears    = margins.length;
+      avgMargin = margins.reduce((a, b) => a + b, 0) / margins.length;
+      if (roes.length >= 2) avgRoe = roes.reduce((a, b) => a + b, 0) / roes.length;
+    }
+
+    // Persist to cache
+    const fetched_at = new Date().toISOString().replace("T", " ").split(".")[0];
+    db.prepare(`
+      INSERT INTO sec_cache
+        (ticker, cik, capital_intensity, capital_intensity_label, earnings_consistency, consistency_years, avg_roe, avg_margin, fetched_at)
+      VALUES (?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(ticker) DO UPDATE SET
+        cik = excluded.cik, capital_intensity = excluded.capital_intensity,
+        capital_intensity_label = excluded.capital_intensity_label,
+        earnings_consistency = excluded.earnings_consistency,
+        consistency_years = excluded.consistency_years,
+        avg_roe = excluded.avg_roe, avg_margin = excluded.avg_margin,
+        fetched_at = excluded.fetched_at
+    `).run(symbol, cik, capitalIntensity, capitalIntensityLabel, earningsConsistency, consistencyYears, avgRoe, avgMargin, fetched_at);
+
+    return {
+      capitalIntensity:      capitalIntensity?.toFixed(1)   ?? null,
+      capitalIntensityLabel: capitalIntensityLabel           ?? null,
+      earningsConsistency:   earningsConsistency             ?? null,
+      consistencyYears,
+      avgRoe:                avgRoe?.toFixed(1)   ?? null,
+      avgMargin:             avgMargin?.toFixed(1) ?? null,
+    };
+  } catch (e) {
+    console.error(`[secMunger] ${symbol}:`, e);
+    return null;
+  }
 }
 
 export async function GET(
@@ -617,28 +638,16 @@ export async function GET(
     reuters.financials.balanceSheet.length ||
     reuters.financials.cashFlow.length;
 
-  const _mungerDebug = {
-    incomeRows: reuters.financials.incomeStatement.length,
-    cfRows: reuters.financials.cashFlow.length,
-    bsRows: reuters.financials.balanceSheet.length,
-    incomeSample: reuters.financials.incomeStatement[0] ?? null,
-    cfSample: reuters.financials.cashFlow[0] ?? null,
-  };
-
   const fcfConversion = calcFCFConversion(finviz?.stats ?? {});
-  const yahooFin = calcMungerFromFinancials(
-    reuters.financials.incomeStatement,
-    reuters.financials.cashFlow,
-    reuters.financials.balanceSheet,
-  );
+  const secFin = await fetchSecMungerData(symbol);
   const mungerMetrics = {
     fcfConversion,
-    capitalIntensity:      yahooFin.capitalIntensity,
-    capitalIntensityLabel: yahooFin.capitalIntensityLabel,
-    earningsConsistency:   yahooFin.earningsConsistency,
-    consistencyYears:      yahooFin.consistencyYears,
-    avgRoe:                yahooFin.avgRoe,
-    avgMargin:             yahooFin.avgMargin,
+    capitalIntensity:      secFin?.capitalIntensity      ?? null,
+    capitalIntensityLabel: secFin?.capitalIntensityLabel ?? null,
+    earningsConsistency:   secFin?.earningsConsistency   ?? null,
+    consistencyYears:      secFin?.consistencyYears      ?? 0,
+    avgRoe:                secFin?.avgRoe                ?? null,
+    avgMargin:             secFin?.avgMargin             ?? null,
   };
 
   const quality = { moatQuality, insiderActivity, riskProfile, rateSensitivity, growthMetrics };
@@ -652,7 +661,7 @@ export async function GET(
       description: finviz?.description || reuters.description,
       intrinsicValue, netCashPerShare,
       debtToRevenue, debtToEbitda, dividendMetrics,
-      extendedMarket, mungerMetrics, _mungerDebug,
+      extendedMarket, mungerMetrics,
       ...valuationExtras,
       ...quality,
     });
@@ -666,7 +675,7 @@ export async function GET(
       priceChange: "",
       intrinsicValue, netCashPerShare,
       debtToRevenue, debtToEbitda, dividendMetrics,
-      extendedMarket, mungerMetrics, _mungerDebug,
+      extendedMarket, mungerMetrics,
       ...valuationExtras,
       ...quality,
     });
