@@ -21,10 +21,12 @@ interface Props {
   rsi: boolean;
   beta: string;
   sort: string;
+  sector: string;
+  industry: string;
   onPageChange: (page: number) => void;
 }
 
-export default function StocksTable({ screener, page, dividend, rsi, beta, sort, onPageChange }: Props) {
+export default function StocksTable({ screener, page, dividend, rsi, beta, sort, sector, industry, onPageChange }: Props) {
   const [headers, setHeaders] = useState<string[]>([]);
   const [rows, setRows] = useState<Row[]>([]);
   const [sorting, setSorting] = useState<SortingState>([]);
@@ -36,7 +38,7 @@ export default function StocksTable({ screener, page, dividend, rsi, beta, sort,
     setRows([]);
     setHeaders([]);
     const r = (page - 1) * PAGE_SIZE + 1;
-    fetch(`/api/stocks?screener=${screener}&r=${r}&dividend=${dividend}&rsi=${rsi}&beta=${beta}&sort=${sort}`)
+    fetch(`/api/stocks?screener=${screener}&r=${r}&dividend=${dividend}&rsi=${rsi}&beta=${beta}&sort=${sort}&sector=${sector}&industry=${industry}`)
       .then((res) => res.json())
       .then((data) => {
         setHeaders(data.headers ?? []);
@@ -44,7 +46,7 @@ export default function StocksTable({ screener, page, dividend, rsi, beta, sort,
       })
       .catch(() => setError("Failed to load stock data."))
       .finally(() => setLoading(false));
-  }, [screener, page, dividend, rsi, beta, sort]);
+  }, [screener, page, dividend, rsi, beta, sort, sector, industry]);
 
   const SIGNAL_STYLE: Record<string, string> = {
     "Strong Buy": "bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800",
@@ -129,7 +131,7 @@ export default function StocksTable({ screener, page, dividend, rsi, beta, sort,
 
       if (h === "Ticker") {
         const price = info.row.original["Price"] ?? "";
-        const back = encodeURIComponent(`/screener?tab=${screener}&page=${page}&dividend=${dividend}&rsi=${rsi}&beta=${beta}&sort=${sort}`);
+        const back = encodeURIComponent(`/screener?tab=${screener}&page=${page}&dividend=${dividend}&rsi=${rsi}&beta=${beta}&sort=${sort}&sector=${sector}&industry=${industry}`);
         const href = `/stocks/${value}?price=${encodeURIComponent(price)}&back=${back}`;
         return (
           <Link

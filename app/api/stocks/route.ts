@@ -115,7 +115,57 @@ export async function GET(request: NextRequest) {
   const beta     = request.nextUrl.searchParams.get("beta") ?? "";
   const sortDesc = request.nextUrl.searchParams.get("sort") === "desc";
 
+  const sector   = request.nextUrl.searchParams.get("sector")   ?? "";
+  const industry = request.nextUrl.searchParams.get("industry") ?? "";
+
   const VALID_BETA = new Set(["u0.5","u1","u1.5","u2","o0.5","o1","o1.5","o2"]);
+
+  const VALID_SECTORS = new Set([
+    "sec_technology","sec_financial","sec_healthcare","sec_energy","sec_utilities",
+    "sec_industrials","sec_consumerdefensive","sec_consumercyclical",
+    "sec_basicmaterials","sec_realestate","sec_communicationservices",
+  ]);
+
+  const VALID_INDUSTRIES = new Set([
+    // Technology
+    "ind_softwareapplication","ind_softwareinfrastructure","ind_semiconductors",
+    "ind_semiconductorequipment","ind_informationtechnologyservices","ind_computerhardware",
+    "ind_electroniccomponents","ind_consumerelectronics","ind_internetcontentinformation",
+    // Financial
+    "ind_banksregional","ind_banksdiversified","ind_insurancelife",
+    "ind_insurancepropertycasualty","ind_assetmanagement","ind_capitalmarkets",
+    "ind_creditservices","ind_insurancediversified","ind_financialdatastockexchanges","ind_mortgagefinance",
+    // Healthcare
+    "ind_drugmanufacturersgeneral","ind_drugmanufacturersspecialtygeneric","ind_biotechnology",
+    "ind_medicaldevices","ind_healthcareplans","ind_diagnosticsresearch",
+    "ind_medicaldistribution","ind_hospitals","ind_medicalinstrumentssupplies",
+    // Energy
+    "ind_oilgasep","ind_oilgasintegrated","ind_oilgasrefiningmarketing",
+    "ind_oilgasequipmentservices","ind_oilgasmidstream",
+    // Consumer Cyclical
+    "ind_automanufacturers","ind_internetretail","ind_restaurants",
+    "ind_homeimprovementretail","ind_apparelretail","ind_departmentstores",
+    "ind_luxurygoods","ind_lodging","ind_gambling","ind_travelservices",
+    // Consumer Defensive
+    "ind_discountstores","ind_beveragesnonalcoholic","ind_beveragesbrewers",
+    "ind_fooddistribution","ind_grocerystores","ind_householdpersonalproducts",
+    "ind_tobacco","ind_packagedfoods",
+    // Industrials
+    "ind_aerospacedefense","ind_airlines","ind_railroads","ind_trucking",
+    "ind_farmheavyconstructionmachinery","ind_specialtyindustrialmachinery",
+    "ind_staffingemploymentservices","ind_wastemanagement","ind_industrialdistribution",
+    // Communication Services
+    "ind_telecomservices","ind_entertainment","ind_electronicgamingmultimedia",
+    "ind_advertisingagencies","ind_publishing",
+    // Utilities
+    "ind_utilitiesregulatedelectric","ind_utilitiesregulatedgas",
+    "ind_utilitiesdiversified","ind_utilitiesrenewable","ind_utilitiesindependentpowerproducers",
+    // Real Estate
+    "ind_reitretail","ind_reitresidential","ind_reitindustrial","ind_reitoffice",
+    "ind_reithealthcarefacilities","ind_reitdiversified","ind_reitspecialty","ind_reitmortgage",
+    // Basic Materials
+    "ind_specialtychemicals","ind_gold","ind_silver","ind_steel","ind_copper","ind_agriculturalInputs",
+  ]);
 
   const cfg = SCREENERS[screener] ?? SCREENERS.megacap;
   const filters = [
@@ -123,6 +173,9 @@ export async function GET(request: NextRequest) {
     dividend ? "fa_div_pos" : "",
     VALID_BETA.has(beta) ? `ta_beta_${beta}` : "",
     rsi ? "ta_rsi_nob50" : "",
+    // Industry takes precedence over sector (it implies sector)
+    VALID_INDUSTRIES.has(industry) ? industry :
+    VALID_SECTORS.has(sector)      ? sector   : "",
   ]
     .filter(Boolean)
     .join(",");
