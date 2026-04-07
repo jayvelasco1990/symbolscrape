@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as cheerio from "cheerio";
 import { computeRiskProfile, computeRateSensitivity } from "@/lib/riskScores";
+import { getDb } from "@/lib/db";
 
 const HEADERS = {
   "User-Agent":
@@ -140,6 +141,62 @@ async function scrapeReuters(symbol: string) {
   }
 
   return { price, description, financials };
+}
+
+async function fetchExtendedMarket(symbol: string) {
+  try {
+    const res = await fetch(
+      `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=price`,
+      { headers: { "User-Agent": HEADERS["User-Agent"] } }
+    );
+    if (!res.ok) {
+      console.error(`[extendedMarket] ${symbol} HTTP ${res.status}`);
+      return null;
+    }
+    const json = await res.json();
+    const p = json?.quoteSummary?.result?.[0]?.price;
+    if (!p) {
+      console.error(`[extendedMarket] ${symbol} no price module:`, JSON.stringify(json).slice(0, 300));
+      return null;
+    }
+
+    const raw  = (field: { raw?: number } | undefined) => field?.raw ?? null;
+    const fmt2 = (n: number) => n.toFixed(2);
+    const fmtPct    = (n: number) => `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
+    const fmtChange = (n: number) => `${n >= 0 ? "+" : ""}${fmt2(n)}`;
+    const fmtTime   = (ts: number) =>
+      new Date(ts * 1000).toLocaleTimeString("en-US", {
+        hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: "America/New_York",
+      });
+
+    const regPrice  = raw(p.regularMarketPrice);
+    const regChange = raw(p.regularMarketChange);
+    const regPct    = raw(p.regularMarketChangePercent);
+    const prePx     = raw(p.preMarketPrice);
+    const preChg    = raw(p.preMarketChange);
+    const prePct    = raw(p.preMarketChangePercent);
+    const postPx    = raw(p.postMarketPrice);
+    const postChg   = raw(p.postMarketChange);
+    const postPct   = raw(p.postMarketChangePercent);
+
+    return {
+      marketState:       (p.marketState ?? "CLOSED") as string,
+      regularPrice:      regPrice  != null ? fmt2(regPrice)        : null,
+      regularChange:     regChange != null ? fmtChange(regChange)  : null,
+      regularChangePct:  regPct    != null ? fmtPct(regPct * 100)  : null,
+      preMarketPrice:    prePx     != null ? fmt2(prePx)           : null,
+      preMarketChange:   preChg    != null ? fmtChange(preChg)     : null,
+      preMarketChangePct: prePct   != null ? fmtPct(prePct * 100)  : null,
+      preMarketTime:     p.preMarketTime  != null ? fmtTime(p.preMarketTime)  : null,
+      postMarketPrice:   postPx    != null ? fmt2(postPx)          : null,
+      postMarketChange:  postChg   != null ? fmtChange(postChg)    : null,
+      postMarketChangePct: postPct != null ? fmtPct(postPct * 100) : null,
+      postMarketTime:    p.postMarketTime != null ? fmtTime(p.postMarketTime) : null,
+    };
+  } catch (e) {
+    console.error(`[extendedMarket] ${symbol} error:`, e);
+    return null;
+  }
 }
 
 async function scrapeFinviz(symbol: string) {
@@ -383,6 +440,169 @@ function calcIntrinsicValue(stats: Record<string, string>) {
   };
 }
 
+function calcFCFConversion(stats: Record<string, string>) {
+  const parseVal = (s: string) => parseFloat(s.replace(/[^0-9.-]/g, "")) || 0;
+  const price = parseVal(stats["Price"]      ?? "");
+  const pfcf  = parseVal(stats["P/FCF"]      ?? "");
+  const eps   = parseVal(stats["EPS (ttm)"]  ?? "");
+  if (!price || !pfcf || !eps || eps <= 0) return null;
+  const fcfPerShare = price / pfcf;
+  const pct = (fcfPerShare / eps) * 100;
+  const label =
+    pct >= 100 ? "Excellent" :
+    pct >= 80  ? "Good"      :
+    pct >= 60  ? "Moderate"  : "Weak";
+  return { pct: pct.toFixed(0), label };
+}
+
+const SEC_UA  = "vpfund-app/1.0 research@vpfund.example.com";
+const SEC_TTL = 24 * 60 * 60 * 1000; // 24 hours
+
+async function fetchSecMungerData(symbol: string) {
+  const db = getDb();
+
+  // Serve from cache if fresh
+  const cached = db
+    .prepare("SELECT * FROM sec_cache WHERE ticker = ?")
+    .get(symbol) as Record<string, string | number> | undefined;
+  if (cached && Date.now() - new Date((cached.fetched_at as string) + "Z").getTime() < SEC_TTL) {
+    return {
+      capitalIntensity:      cached.capital_intensity      != null ? (cached.capital_intensity as number).toFixed(1) : null,
+      capitalIntensityLabel: (cached.capital_intensity_label as string) ?? null,
+      earningsConsistency:   (cached.earnings_consistency  as string) ?? null,
+      consistencyYears:      (cached.consistency_years     as number) ?? 0,
+      avgRoe:                cached.avg_roe   != null ? (cached.avg_roe   as number).toFixed(1) : null,
+      avgMargin:             cached.avg_margin != null ? (cached.avg_margin as number).toFixed(1) : null,
+    };
+  }
+
+  try {
+    // Step 1: CIK lookup via SEC EDGAR
+    const cikRes = await fetch(
+      `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${symbol}&type=10-K&dateb=&owner=include&count=1&output=atom`,
+      { headers: { "User-Agent": SEC_UA } }
+    );
+    if (!cikRes.ok) return null;
+    const cikXml  = await cikRes.text();
+    const cikMatch = cikXml.match(/CIK=(\d+)/);
+    if (!cikMatch) return null;
+    const cik = cikMatch[1].padStart(10, "0");
+
+    // Step 2: Company facts (XBRL)
+    const factsRes = await fetch(
+      `https://data.sec.gov/api/xbrl/companyfacts/CIK${cik}.json`,
+      { headers: { "User-Agent": SEC_UA } }
+    );
+    if (!factsRes.ok) return null;
+    const facts = await factsRes.json();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const gaap = (facts as any)?.facts?.["us-gaap"] ?? {};
+
+    // Extract deduplicated annual values for a concept
+    function getAnnual(concept: string): { end: string; val: number }[] {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const entries: any[] = gaap[concept]?.units?.USD ?? [];
+      const map = new Map<string, { end: string; val: number; filed: string }>();
+      for (const e of entries) {
+        if (e.fp === "FY" && e.form === "10-K" && e.val != null) {
+          const ex = map.get(e.end);
+          if (!ex || e.filed > ex.filed) map.set(e.end, { end: e.end, val: e.val, filed: e.filed });
+        }
+      }
+      return [...map.values()].sort((a, b) => b.end.localeCompare(a.end)).slice(0, 5);
+    }
+
+    const capexData = getAnnual("PaymentsToAcquirePropertyPlantAndEquipment");
+    let revData: { end: string; val: number }[] = [];
+    for (const tag of [
+      "RevenueFromContractWithCustomerExcludingAssessedTax",
+      "Revenues", "SalesRevenueNet",
+      "RevenueFromContractWithCustomerIncludingAssessedTax",
+    ]) {
+      revData = getAnnual(tag);
+      if (revData.length) break;
+    }
+    const niData  = getAnnual("NetIncomeLoss");
+    const eqData  = getAnnual("StockholdersEquity");
+
+    // Capital Intensity: |CapEx| / Revenue (most recent annual)
+    let capitalIntensity: number | null = null;
+    let capitalIntensityLabel: string | null = null;
+    if (capexData.length && revData.length) {
+      const pct = (Math.abs(capexData[0].val) / revData[0].val) * 100;
+      if (pct > 0 && pct < 80) {
+        capitalIntensity      = parseFloat(pct.toFixed(1));
+        capitalIntensityLabel = pct < 3 ? "Asset-light" : pct < 10 ? "Moderate" : "Capital-heavy";
+      }
+    }
+
+    // Earnings Consistency: CV of net margin + ROE over up to 4 years
+    const revMap = new Map(revData.map((d) => [d.end, d.val]));
+    const eqMap  = new Map(eqData.map((d) => [d.end, d.val]));
+    const margins: number[] = [];
+    const roes:    number[] = [];
+
+    for (const ni of niData.slice(0, 4)) {
+      const rev = revMap.get(ni.end);
+      const eq  = eqMap.get(ni.end);
+      if (rev && rev > 0) margins.push((ni.val / rev) * 100);
+      if (eq  && eq  > 0) roes.push((ni.val / eq) * 100);
+    }
+
+    const cv = (arr: number[]) => {
+      if (arr.length < 2) return null;
+      const mean = arr.reduce((a, b) => a + b, 0) / arr.length;
+      if (Math.abs(mean) < 0.5) return null;
+      const std = Math.sqrt(arr.reduce((a, b) => a + (b - mean) ** 2, 0) / arr.length);
+      return std / Math.abs(mean);
+    };
+
+    let earningsConsistency: string | null = null;
+    let consistencyYears = 0;
+    let avgRoe: number | null = null;
+    let avgMargin: number | null = null;
+
+    const combined = (() => {
+      const mc = cv(margins); const rc = cv(roes);
+      return mc != null && rc != null ? (mc + rc) / 2 : mc ?? rc;
+    })();
+
+    if (combined != null && margins.length >= 2) {
+      earningsConsistency = combined < 0.15 ? "High" : combined < 0.35 ? "Moderate" : "Low";
+      consistencyYears    = margins.length;
+      avgMargin = margins.reduce((a, b) => a + b, 0) / margins.length;
+      if (roes.length >= 2) avgRoe = roes.reduce((a, b) => a + b, 0) / roes.length;
+    }
+
+    // Persist to cache
+    const fetched_at = new Date().toISOString().replace("T", " ").split(".")[0];
+    db.prepare(`
+      INSERT INTO sec_cache
+        (ticker, cik, capital_intensity, capital_intensity_label, earnings_consistency, consistency_years, avg_roe, avg_margin, fetched_at)
+      VALUES (?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(ticker) DO UPDATE SET
+        cik = excluded.cik, capital_intensity = excluded.capital_intensity,
+        capital_intensity_label = excluded.capital_intensity_label,
+        earnings_consistency = excluded.earnings_consistency,
+        consistency_years = excluded.consistency_years,
+        avg_roe = excluded.avg_roe, avg_margin = excluded.avg_margin,
+        fetched_at = excluded.fetched_at
+    `).run(symbol, cik, capitalIntensity, capitalIntensityLabel, earningsConsistency, consistencyYears, avgRoe, avgMargin, fetched_at);
+
+    return {
+      capitalIntensity:      capitalIntensity?.toFixed(1)   ?? null,
+      capitalIntensityLabel: capitalIntensityLabel           ?? null,
+      earningsConsistency:   earningsConsistency             ?? null,
+      consistencyYears,
+      avgRoe:                avgRoe?.toFixed(1)   ?? null,
+      avgMargin:             avgMargin?.toFixed(1) ?? null,
+    };
+  } catch (e) {
+    console.error(`[secMunger] ${symbol}:`, e);
+    return null;
+  }
+}
+
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ ticker: string }> }
@@ -390,9 +610,10 @@ export async function GET(
   const { ticker } = await params;
   const symbol = ticker.toUpperCase();
 
-  const [reuters, finviz] = await Promise.all([
+  const [reuters, finviz, extendedMarket] = await Promise.all([
     scrapeReuters(symbol),
     scrapeFinviz(symbol),
+    fetchExtendedMarket(symbol),
   ]);
 
   const intrinsicValue  = calcIntrinsicValue(finviz?.stats ?? {});
@@ -405,12 +626,32 @@ export async function GET(
   const riskProfile     = computeRiskProfile(finviz?.sector ?? "", finviz?.description || reuters.description);
   const rateSensitivity = computeRateSensitivity(finviz?.sector ?? "");
 
+  // EV/EBITDA and FCF Yield — already in Finviz stats
+  const parseVal = (s: string) => parseFloat(s.replace(/[^0-9.-]/g, "")) || 0;
+  const evEbitda = finviz?.stats?.["EV/EBITDA"] ?? "";
+  const pfcfRaw  = finviz?.stats?.["P/FCF"] ?? "";
+  const pfcfN    = parseVal(pfcfRaw);
+  const fcfYield = pfcfN > 0 ? parseFloat((100 / pfcfN).toFixed(2)) : null;
+
   const hasReutersData =
     reuters.financials.incomeStatement.length ||
     reuters.financials.balanceSheet.length ||
     reuters.financials.cashFlow.length;
 
+  const fcfConversion = calcFCFConversion(finviz?.stats ?? {});
+  const secFin = await fetchSecMungerData(symbol);
+  const mungerMetrics = {
+    fcfConversion,
+    capitalIntensity:      secFin?.capitalIntensity      ?? null,
+    capitalIntensityLabel: secFin?.capitalIntensityLabel ?? null,
+    earningsConsistency:   secFin?.earningsConsistency   ?? null,
+    consistencyYears:      secFin?.consistencyYears      ?? 0,
+    avgRoe:                secFin?.avgRoe                ?? null,
+    avgMargin:             secFin?.avgMargin             ?? null,
+  };
+
   const quality = { moatQuality, insiderActivity, riskProfile, rateSensitivity, growthMetrics };
+  const valuationExtras = { evEbitda, fcfYield, sector: finviz?.sector ?? "" };
 
   if (hasReutersData) {
     return NextResponse.json({
@@ -420,6 +661,8 @@ export async function GET(
       description: finviz?.description || reuters.description,
       intrinsicValue, netCashPerShare,
       debtToRevenue, debtToEbitda, dividendMetrics,
+      extendedMarket, mungerMetrics,
+      ...valuationExtras,
       ...quality,
     });
   }
@@ -432,6 +675,8 @@ export async function GET(
       priceChange: "",
       intrinsicValue, netCashPerShare,
       debtToRevenue, debtToEbitda, dividendMetrics,
+      extendedMarket, mungerMetrics,
+      ...valuationExtras,
       ...quality,
     });
   }
@@ -446,6 +691,9 @@ export async function GET(
     dividendMetrics: null,
     debtToRevenue: "",
     debtToEbitda: "",
+    extendedMarket: null,
+    mungerMetrics: null,
+    ...valuationExtras,
     ...quality,
   });
 }

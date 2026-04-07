@@ -2,10 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import * as cheerio from "cheerio";
 import { getDb } from "@/lib/db";
 
-const SCREENERS: Record<string, { filters: string; extra?: string }> = {
-  megacap:  { filters: "cap_mega",           extra: "&o=pe&ft=3" },
-  largecap: { filters: "cap_large,geo_usa",  extra: "&o=pe" },
-  smallcap: { filters: "cap_small,geo_usa",  extra: "&o=pe" },
+const SCREENERS: Record<string, { filters: string; extraFilters?: string }> = {
+  megacap:  { filters: "cap_mega",          extraFilters: "&ft=3" },
+  largecap: { filters: "cap_large,geo_usa" },
+  midcap:   { filters: "cap_mid,geo_usa" },
+  smallcap: { filters: "cap_small,geo_usa" },
+  microcap: { filters: "cap_micro,geo_usa" },
 };
 
 const HEADERS = {
@@ -77,7 +79,7 @@ function computeSignal(
   // Require both P/E and P/B — Graham Rule is the core signal
   if (!peN || peN < 0 || !pbN) return "No Data";
 
-  const pfcfN = parseNum(pfcf);
+  const pfcfN      = parseNum(pfcf);
   const epsGrowthN = parseNum(epsNextY);
 
   let score = 0;
@@ -91,12 +93,17 @@ function computeSignal(
   // Positive free cash flow (P/FCF exists and isn't stretched)
   if (pfcfN > 0 && pfcfN < 35) score += 1;
 
+  // FCF Yield > 3% — meaningful cash return relative to price paid
+  const fcfYield = pfcfN > 0 ? 100 / pfcfN : 0;
+  if (fcfYield > 3) score += 1;
+
   // Forward earnings growth estimate
   if (epsGrowthN > 0) score += 1;
 
-  if (score >= 4) return "Strong Buy";
-  if (score === 3) return "Buy";
-  if (score === 2) return "Neutral";
+  // Max score = 6; thresholds adjusted upward to reflect stronger criteria
+  if (score >= 5) return "Strong Buy";
+  if (score === 4) return "Buy";
+  if (score === 3) return "Neutral";
   return "Avoid";
 }
 
@@ -106,8 +113,59 @@ export async function GET(request: NextRequest) {
   const dividend = request.nextUrl.searchParams.get("dividend") === "true";
   const rsi      = request.nextUrl.searchParams.get("rsi") === "true";
   const beta     = request.nextUrl.searchParams.get("beta") ?? "";
+  const sortDesc = request.nextUrl.searchParams.get("sort") === "desc";
+
+  const sector   = request.nextUrl.searchParams.get("sector")   ?? "";
+  const industry = request.nextUrl.searchParams.get("industry") ?? "";
 
   const VALID_BETA = new Set(["u0.5","u1","u1.5","u2","o0.5","o1","o1.5","o2"]);
+
+  const VALID_SECTORS = new Set([
+    "sec_technology","sec_financial","sec_healthcare","sec_energy","sec_utilities",
+    "sec_industrials","sec_consumerdefensive","sec_consumercyclical",
+    "sec_basicmaterials","sec_realestate","sec_communicationservices",
+  ]);
+
+  const VALID_INDUSTRIES = new Set([
+    // Technology
+    "ind_softwareapplication","ind_softwareinfrastructure","ind_semiconductors",
+    "ind_semiconductorequipment","ind_informationtechnologyservices","ind_computerhardware",
+    "ind_electroniccomponents","ind_consumerelectronics","ind_internetcontentinformation",
+    // Financial
+    "ind_banksregional","ind_banksdiversified","ind_insurancelife",
+    "ind_insurancepropertycasualty","ind_assetmanagement","ind_capitalmarkets",
+    "ind_creditservices","ind_insurancediversified","ind_financialdatastockexchanges","ind_mortgagefinance",
+    // Healthcare
+    "ind_drugmanufacturersgeneral","ind_drugmanufacturersspecialtygeneric","ind_biotechnology",
+    "ind_medicaldevices","ind_healthcareplans","ind_diagnosticsresearch",
+    "ind_medicaldistribution","ind_hospitals","ind_medicalinstrumentssupplies",
+    // Energy
+    "ind_oilgasep","ind_oilgasintegrated","ind_oilgasrefiningmarketing",
+    "ind_oilgasequipmentservices","ind_oilgasmidstream",
+    // Consumer Cyclical
+    "ind_automanufacturers","ind_internetretail","ind_restaurants",
+    "ind_homeimprovementretail","ind_apparelretail","ind_departmentstores",
+    "ind_luxurygoods","ind_lodging","ind_gambling","ind_travelservices",
+    // Consumer Defensive
+    "ind_discountstores","ind_beveragesnonalcoholic","ind_beveragesbrewers",
+    "ind_fooddistribution","ind_grocerystores","ind_householdpersonalproducts",
+    "ind_tobacco","ind_packagedfoods",
+    // Industrials
+    "ind_aerospacedefense","ind_airlines","ind_railroads","ind_trucking",
+    "ind_farmheavyconstructionmachinery","ind_specialtyindustrialmachinery",
+    "ind_staffingemploymentservices","ind_wastemanagement","ind_industrialdistribution",
+    // Communication Services
+    "ind_telecomservices","ind_entertainment","ind_electronicgamingmultimedia",
+    "ind_advertisingagencies","ind_publishing",
+    // Utilities
+    "ind_utilitiesregulatedelectric","ind_utilitiesregulatedgas",
+    "ind_utilitiesdiversified","ind_utilitiesrenewable","ind_utilitiesindependentpowerproducers",
+    // Real Estate
+    "ind_reitretail","ind_reitresidential","ind_reitindustrial","ind_reitoffice",
+    "ind_reithealthcarefacilities","ind_reitdiversified","ind_reitspecialty","ind_reitmortgage",
+    // Basic Materials
+    "ind_specialtychemicals","ind_gold","ind_silver","ind_steel","ind_copper","ind_agriculturalInputs",
+  ]);
 
   const cfg = SCREENERS[screener] ?? SCREENERS.megacap;
   const filters = [
@@ -115,11 +173,15 @@ export async function GET(request: NextRequest) {
     dividend ? "fa_div_pos" : "",
     VALID_BETA.has(beta) ? `ta_beta_${beta}` : "",
     rsi ? "ta_rsi_nob50" : "",
+    // Industry takes precedence over sector (it implies sector)
+    VALID_INDUSTRIES.has(industry) ? industry :
+    VALID_SECTORS.has(sector)      ? sector   : "",
   ]
     .filter(Boolean)
     .join(",");
 
-  const baseQuery = `f=${filters}${cfg.extra ?? ""}&r=${r}`;
+  const sortParam = sortDesc ? "-pe" : "pe";
+  const baseQuery = `f=${filters}&o=${sortParam}${cfg.extraFilters ?? ""}&r=${r}`;
   const db = getDb();
 
   // Always fetch overview (display) and financial (dividend) in parallel
@@ -227,6 +289,25 @@ export async function GET(request: NextRequest) {
     return `${rsYTD.toFixed(1)}|${trend}`;
   }
 
+  function computeMomentumFlag(ticker: string, sector: string): string {
+    const perf = perfByTicker[ticker];
+    if (!perf || perf.ytd == null) return "Weak";
+    const etf = SECTOR_TO_ETF[sector];
+    const rsYTD = etf && sectorYTD[etf] != null ? perf.ytd - sectorYTD[etf] : null;
+    const rsMo  = etf && sectorMo[etf]  != null && perf.month != null ? perf.month - sectorMo[etf] : null;
+    const accelerating = rsMo != null && rsYTD != null && rsMo > rsYTD + 1;
+    if (rsYTD != null) {
+      if (rsYTD > 5 || (rsYTD > 2 && accelerating)) return "Strong";
+      if (rsYTD > 0 && perf.ytd > 0) return "Moderate";
+      if (rsYTD < -5 || perf.ytd < -15) return "Bearish";
+      return "Weak";
+    }
+    if (perf.ytd > 10)  return "Strong";
+    if (perf.ytd > 0)   return "Moderate";
+    if (perf.ytd < -15) return "Bearish";
+    return "Weak";
+  }
+
   const tickers = rows111.map((r) => r["Ticker"]).filter(Boolean);
 
   // Load cached signals from SQLite
@@ -289,9 +370,10 @@ export async function GET(request: NextRequest) {
 
   const DROP = new Set(["No.", "Volume", "Industry", "Country", "Change"]);
 
-  // Build final output: drop noise columns, inject "Signal" + "RS" at front, "Dividend" after Price
+  // Build final output: drop noise columns, inject "Signal" + "Momentum" + "RS" at front, "Dividend" after Price
   const displayHeaders = [
     "Signal",
+    "Momentum",
     "RS",
     ...headers111
       .filter((h) => !DROP.has(h))
@@ -306,6 +388,7 @@ export async function GET(request: NextRequest) {
     }
     return {
       Signal: signalByTicker[ticker] ?? "No Data",
+      Momentum: computeMomentumFlag(ticker, row["Sector"] ?? ""),
       RS: computeRS(ticker, row["Sector"] ?? ""),
       ...cleaned,
       Dividend: row["_dividend"] ?? "",

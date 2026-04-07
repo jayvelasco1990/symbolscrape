@@ -20,10 +20,13 @@ interface Props {
   dividend: boolean;
   rsi: boolean;
   beta: string;
+  sort: string;
+  sector: string;
+  industry: string;
   onPageChange: (page: number) => void;
 }
 
-export default function StocksTable({ screener, page, dividend, rsi, beta, onPageChange }: Props) {
+export default function StocksTable({ screener, page, dividend, rsi, beta, sort, sector, industry, onPageChange }: Props) {
   const [headers, setHeaders] = useState<string[]>([]);
   const [rows, setRows] = useState<Row[]>([]);
   const [sorting, setSorting] = useState<SortingState>([]);
@@ -35,7 +38,7 @@ export default function StocksTable({ screener, page, dividend, rsi, beta, onPag
     setRows([]);
     setHeaders([]);
     const r = (page - 1) * PAGE_SIZE + 1;
-    fetch(`/api/stocks?screener=${screener}&r=${r}&dividend=${dividend}&rsi=${rsi}&beta=${beta}`)
+    fetch(`/api/stocks?screener=${screener}&r=${r}&dividend=${dividend}&rsi=${rsi}&beta=${beta}&sort=${sort}&sector=${sector}&industry=${industry}`)
       .then((res) => res.json())
       .then((data) => {
         setHeaders(data.headers ?? []);
@@ -43,7 +46,7 @@ export default function StocksTable({ screener, page, dividend, rsi, beta, onPag
       })
       .catch(() => setError("Failed to load stock data."))
       .finally(() => setLoading(false));
-  }, [screener, page, dividend, rsi, beta]);
+  }, [screener, page, dividend, rsi, beta, sort, sector, industry]);
 
   const SIGNAL_STYLE: Record<string, string> = {
     "Strong Buy": "bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800",
@@ -58,6 +61,30 @@ export default function StocksTable({ screener, page, dividend, rsi, beta, onPag
     header: h,
     cell: (info) => {
       const value = info.getValue() as string;
+
+      if (h === "Momentum") {
+        const MOMENTUM_STYLE: Record<string, string> = {
+          Strong:   "bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800",
+          Moderate: "bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800",
+          Weak:     "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700",
+          Bearish:  "bg-red-100 dark:bg-red-950 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800",
+        };
+        const MOMENTUM_DOT: Record<string, string> = {
+          Strong: "bg-emerald-500", Moderate: "bg-indigo-500", Weak: "bg-zinc-400", Bearish: "bg-red-500",
+        };
+        if (!value) return <span className="text-zinc-300 dark:text-zinc-600 text-[10px]">—</span>;
+        const cls = MOMENTUM_STYLE[value] ?? MOMENTUM_STYLE["Weak"];
+        const dot = MOMENTUM_DOT[value] ?? MOMENTUM_DOT["Weak"];
+        return (
+          <span
+            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap ${cls}`}
+            title="Momentum: RS vs sector ETF (YTD) + trend acceleration"
+          >
+            <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
+            {value}
+          </span>
+        );
+      }
 
       if (h === "Signal") {
         if (value === "No Data") {
@@ -93,7 +120,7 @@ export default function StocksTable({ screener, page, dividend, rsi, beta, onPag
           trend === "↑" ? "text-emerald-500 dark:text-emerald-400" :
           trend === "↓" ? "text-red-400" : "text-zinc-400";
         return (
-          <span className="flex items-center gap-0.5 whitespace-nowrap" title="Relative Strength vs sector ETF (YTD). Arrow shows if RS is accelerating (↑) or fading (↓) vs 1M.">
+          <span className="inline-flex items-center gap-0.5 whitespace-nowrap" title="Relative Strength vs sector ETF (YTD). Arrow shows if RS is accelerating (↑) or fading (↓) vs 1M.">
             <span className={`font-semibold text-[11px] ${color}`}>
               {num > 0 ? "+" : ""}{numStr}%
             </span>
@@ -104,7 +131,7 @@ export default function StocksTable({ screener, page, dividend, rsi, beta, onPag
 
       if (h === "Ticker") {
         const price = info.row.original["Price"] ?? "";
-        const back = encodeURIComponent(`/screener?tab=${screener}&page=${page}&dividend=${dividend}&rsi=${rsi}&beta=${beta}`);
+        const back = encodeURIComponent(`/screener?tab=${screener}&page=${page}&dividend=${dividend}&rsi=${rsi}&beta=${beta}&sort=${sort}&sector=${sector}&industry=${industry}`);
         const href = `/stocks/${value}?price=${encodeURIComponent(price)}&back=${back}`;
         return (
           <Link
