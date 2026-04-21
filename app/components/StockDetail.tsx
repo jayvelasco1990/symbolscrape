@@ -30,6 +30,7 @@ interface QuoteData {
     cashFlow: TableRow[];
   };
   intrinsicValue?: { fairValue: string; formula?: string; note?: string };
+  bearCase?: { price: string; troughPe: number; troughPs: number; eps: string; epsLabel: string; beta: number; psRatio: string | null; fcfConversionPct: number | null; week52High: number | null; week52Low: number | null; method: string } | null;
   netCashPerShare?: string;
   debtToRevenue?: string;
   debtToEbitda?: string;
@@ -355,6 +356,7 @@ export default function StockDetail({
             evEbitda={data.evEbitda}
             fcfYield={data.fcfYield}
             sector={data.sector}
+            bearCase={data.bearCase}
           />
         </>
       )}

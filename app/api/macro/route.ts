@@ -79,6 +79,104 @@ async function fetchFredYoY(id: string): Promise<{ value: number | null; yoyChan
   }
 }
 
+interface CpiComponent {
+  name: string;
+  seriesId: string;
+  sectorEtf: string;
+  sectorLabel: string;
+  yoy: number | null;
+  mom: number | null;
+  trend: "accelerating" | "decelerating" | "stable" | null;
+}
+
+const CPI_SERIES: { id: string; name: string; etf: string; sector: string }[] = [
+  { id: "CPIFABSL",       name: "Food & Beverages",  etf: "XLP",  sector: "Cons. Staples" },
+  { id: "CPIENGSL",       name: "Energy",            etf: "XLE",  sector: "Energy"        },
+  { id: "CUSR0000SAH1",   name: "Shelter",           etf: "XLRE", sector: "Real Estate"   },
+  { id: "CPIMEDSL",       name: "Medical Care",      etf: "XLV",  sector: "Health Care"   },
+  { id: "CPITRNSL",       name: "Transportation",    etf: "XLI",  sector: "Industrials"   },
+  { id: "CPIAPPSL",       name: "Apparel",           etf: "XLY",  sector: "Cons. Disc."   },
+  { id: "CPIRECSL",       name: "Recreation",        etf: "XLY",  sector: "Cons. Disc."   },
+  { id: "CUSR0000SETA02", name: "Used Vehicles",     etf: "XLY",  sector: "Cons. Disc."   },
+];
+
+async function fetchCpiComponents(): Promise<CpiComponent[]> {
+  const results = await Promise.all(
+    CPI_SERIES.map(async ({ id, name, etf, sector }) => {
+      const base: CpiComponent = {
+        name, seriesId: id, sectorEtf: etf, sectorLabel: sector,
+        yoy: null, mom: null, trend: null,
+      };
+      try {
+        const res = await fetch(
+          `https://fred.stlouisfed.org/graph/fredgraph.csv?id=${id}`,
+          { headers: { "User-Agent": HEADERS["User-Agent"] } }
+        );
+        if (!res.ok) return base;
+        const lines = (await res.text()).trim().split("\n").slice(1);
+        const vals: number[] = [];
+        for (const line of lines) {
+          const v = line.split(",")[1]?.trim();
+          if (v && v !== "." && !isNaN(parseFloat(v))) vals.push(parseFloat(v));
+        }
+        if (vals.length < 2) return base;
+        const latest   = vals[vals.length - 1];
+        const prevMonth = vals[vals.length - 2];
+        const yearAgo   = vals.length >= 13 ? vals[vals.length - 13] : null;
+        const twoMonthAgo = vals.length >= 3 ? vals[vals.length - 3] : null;
+
+        const mom = prevMonth > 0
+          ? parseFloat(((latest / prevMonth - 1) * 100).toFixed(2))
+          : null;
+        const momPrev = twoMonthAgo && prevMonth > 0
+          ? parseFloat(((prevMonth / twoMonthAgo - 1) * 100).toFixed(2))
+          : null;
+        const yoy = yearAgo && yearAgo > 0
+          ? parseFloat(((latest / yearAgo - 1) * 100).toFixed(2))
+          : null;
+
+        let trend: CpiComponent["trend"] = null;
+        if (mom != null && momPrev != null) {
+          if (mom > momPrev + 0.05) trend = "accelerating";
+          else if (mom < momPrev - 0.05) trend = "decelerating";
+          else trend = "stable";
+        }
+
+        return { ...base, yoy, mom, trend };
+      } catch {
+        return base;
+      }
+    })
+  );
+  return results;
+}
+
+async function fetchPpi(): Promise<{ yoy: number | null; mom: number | null }> {
+  try {
+    const res = await fetch(
+      `https://fred.stlouisfed.org/graph/fredgraph.csv?id=PPIACO`,
+      { headers: { "User-Agent": HEADERS["User-Agent"] } }
+    );
+    if (!res.ok) return { yoy: null, mom: null };
+    const lines = (await res.text()).trim().split("\n").slice(1);
+    const vals: number[] = [];
+    for (const line of lines) {
+      const v = line.split(",")[1]?.trim();
+      if (v && v !== "." && !isNaN(parseFloat(v))) vals.push(parseFloat(v));
+    }
+    if (vals.length < 2) return { yoy: null, mom: null };
+    const latest    = vals[vals.length - 1];
+    const prevMonth = vals[vals.length - 2];
+    const yearAgo   = vals.length >= 13 ? vals[vals.length - 13] : null;
+    return {
+      mom: prevMonth > 0 ? parseFloat(((latest / prevMonth - 1) * 100).toFixed(2)) : null,
+      yoy: yearAgo && yearAgo > 0 ? parseFloat(((latest / yearAgo - 1) * 100).toFixed(2)) : null,
+    };
+  } catch {
+    return { yoy: null, mom: null };
+  }
+}
+
 async function fetchFearAndGreed(): Promise<{ score: number | null; rating: string | null }> {
   try {
     const res = await fetch(
@@ -192,7 +290,7 @@ export async function GET() {
     const age = Date.now() - new Date(cached.fetched_at + "Z").getTime();
     if (age < CACHE_TTL_MS) {
       const parsed = JSON.parse(cached.data);
-      if (parsed.sectors?.[0]?.rateRisk !== undefined && parsed.indexes !== undefined && parsed.economics !== undefined && parsed.sentiment !== undefined) {
+      if (parsed.sectors?.[0]?.rateRisk !== undefined && parsed.indexes !== undefined && parsed.economics !== undefined && parsed.sentiment !== undefined && parsed.inflation !== undefined) {
         return NextResponse.json({ ...parsed, cached: true, fetchedAt: cached.fetched_at });
       }
     }
@@ -207,7 +305,7 @@ export async function GET() {
     ...allSubsectorEtfs,
   ];
 
-  const [[dgs10, dgs2, fedFunds, igSpread, hySpread, vix], allEtfData, cpi, corePce, fearAndGreed, unemployment] =
+  const [[dgs10, dgs2, fedFunds, igSpread, hySpread, vix], allEtfData, cpi, corePce, fearAndGreed, unemployment, cpiComponents, ppi] =
     await Promise.all([
       Promise.all([
         fetchFredSeries("DGS10"),
@@ -222,6 +320,8 @@ export async function GET() {
       fetchFredYoY("PCEPILFE"),
       fetchFearAndGreed(),
       fetchFredSeries("UNRATE"),
+      fetchCpiComponents(),
+      fetchPpi(),
     ]);
 
   const nIndexes    = INDEX_ETFS.length;
@@ -275,6 +375,10 @@ export async function GET() {
       cpiYoY: cpi.yoyChange,
       corePceYoY: corePce.yoyChange,
       unemployment,
+    },
+    inflation: {
+      components: cpiComponents,
+      ppi,
     },
     sentiment: {
       fearGreedScore: fearAndGreed.score,

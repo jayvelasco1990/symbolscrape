@@ -420,6 +420,80 @@ function calcInsiderActivity(stats: Record<string, string>) {
   };
 }
 
+const TROUGH_PE: Record<string, number> = {
+  "Technology":             15,
+  "Health Care":            14,
+  "Healthcare":             14,
+  "Energy":                 8,
+  "Utilities":              12,
+  "Industrials":            10,
+  "Consumer Defensive":     16,
+  "Consumer Cyclical":      10,
+  "Basic Materials":        8,
+  "Communication Services": 10,
+  "Financial":              8,
+  "Financial Services":     8,
+  "Real Estate":            14,
+};
+const DEFAULT_TROUGH_PE = 12;
+
+// Trough P/S multiples — used when EV/EBITDA is unavailable (negative EBITDA, pre-profit cos.)
+const TROUGH_PS: Record<string, number> = {
+  "Technology":             3.0,
+  "Health Care":            2.0,
+  "Healthcare":             2.0,
+  "Energy":                 0.5,
+  "Utilities":              1.0,
+  "Industrials":            0.5,
+  "Consumer Defensive":     0.5,
+  "Consumer Cyclical":      0.3,
+  "Basic Materials":        0.5,
+  "Communication Services": 1.0,
+  "Financial":              1.5,
+  "Financial Services":     1.5,
+  "Real Estate":            3.0,
+};
+const DEFAULT_TROUGH_PS = 1.0;
+
+function calcBearCase(stats: Record<string, string>, sector: string) {
+  const parseVal = (s: string) => parseFloat(s.replace(/[^0-9.-]/g, "")) || 0;
+  const epsTtm  = parseVal(stats["EPS (ttm)"]  ?? "");
+  const epsFwd  = parseVal(stats["EPS next Y"] ?? "");
+
+  // Use the more conservative (lower) EPS to avoid one-time item distortion
+  const candidates = [epsTtm, epsFwd].filter((v) => v > 0);
+  if (!candidates.length) return null;
+  const eps      = Math.min(...candidates);
+  const epsLabel = eps === epsFwd && epsFwd < epsTtm ? "Fwd EPS" : "TTM EPS";
+
+  const troughPe  = TROUGH_PE[sector] ?? DEFAULT_TROUGH_PE;
+  const troughPs  = TROUGH_PS[sector] ?? DEFAULT_TROUGH_PS;
+  const beta      = parseVal(stats["Beta"]     ?? "") || 1.0;
+  const psRatio   = parseVal(stats["P/S"]      ?? "") || null;
+  const price     = parseVal(stats["Price"]    ?? "");
+  const pfcf      = parseVal(stats["P/FCF"]    ?? "");
+  const week52High = parseVal(stats["52W High"] ?? "") || null;
+  const week52Low  = parseVal(stats["52W Low"]  ?? "") || null;
+
+  // FCF conversion = FCF/share ÷ EPS — measures earnings quality
+  const fcfPerShare      = pfcf > 0 && price > 0 ? price / pfcf : null;
+  const fcfConversionPct = fcfPerShare != null ? (fcfPerShare / eps) * 100 : null;
+
+  return {
+    price:            (troughPe * eps).toFixed(2),
+    troughPe,
+    troughPs,
+    eps:              eps.toFixed(2),
+    epsLabel,
+    beta,
+    psRatio:          psRatio ? psRatio.toString() : null,
+    fcfConversionPct: fcfConversionPct != null ? parseFloat(fcfConversionPct.toFixed(1)) : null,
+    week52High:       week52High ? parseFloat(week52High.toFixed(2)) : null,
+    week52Low:        week52Low  ? parseFloat(week52Low.toFixed(2))  : null,
+    method:           `${troughPe}× trough P/E × ${epsLabel}`,
+  };
+}
+
 function calcIntrinsicValue(stats: Record<string, string>) {
   const parseVal = (s: string) => parseFloat(s.replace(/[^0-9.-]/g, "")) || 0;
   const eps    = parseVal(stats["EPS (ttm)"] ?? "");
@@ -617,6 +691,7 @@ export async function GET(
   ]);
 
   const intrinsicValue  = calcIntrinsicValue(finviz?.stats ?? {});
+  const bearCase        = calcBearCase(finviz?.stats ?? {}, finviz?.sector ?? "");
   const netCashPerShare = calcNetCash(finviz?.stats ?? {});
   const { debtToRevenue, debtToEbitda } = calcDebtMetrics(finviz?.stats ?? {});
   const dividendMetrics = calcDividendMetrics(finviz?.stats ?? {});
@@ -659,7 +734,7 @@ export async function GET(
       ...reuters,
       price: finviz?.price || reuters.price,
       description: finviz?.description || reuters.description,
-      intrinsicValue, netCashPerShare,
+      intrinsicValue, bearCase, netCashPerShare,
       debtToRevenue, debtToEbitda, dividendMetrics,
       extendedMarket, mungerMetrics,
       ...valuationExtras,
@@ -673,7 +748,7 @@ export async function GET(
       ticker: symbol,
       ...finvizWithoutStats,
       priceChange: "",
-      intrinsicValue, netCashPerShare,
+      intrinsicValue, bearCase, netCashPerShare,
       debtToRevenue, debtToEbitda, dividendMetrics,
       extendedMarket, mungerMetrics,
       ...valuationExtras,
