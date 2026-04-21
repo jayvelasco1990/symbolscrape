@@ -27,6 +27,12 @@ export default function NavBar() {
         >
           Macro
         </Link>
+        <Link
+          href="/trades"
+          className="text-sm font-medium text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+        >
+          Tax
+        </Link>
         <a
           href="https://olui2.fs.ml.com/login/signin.aspx"
           target="_blank"
