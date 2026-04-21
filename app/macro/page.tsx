@@ -25,6 +25,17 @@ interface MacroData {
     isInverted: boolean;
   };
   spreads: { ig: number | null; hy: number | null };
+  inflation?: {
+    components: Array<{
+      name: string;
+      sectorEtf: string;
+      sectorLabel: string;
+      yoy: number | null;
+      mom: number | null;
+      trend: "accelerating" | "decelerating" | "stable" | null;
+    }>;
+    ppi: { yoy: number | null; mom: number | null };
+  };
   economics: {
     cpiYoY: number | null;
     corePceYoY: number | null;
@@ -196,15 +207,187 @@ function IndexCard({ idx }: { idx: EtfRow }) {
   );
 }
 
+const MACRO_PLAYS: Record<string, {
+  rising: { theme: string; tickers: string[] };
+  falling: { theme: string; tickers: string[] };
+}> = {
+  "Food & Beverages": {
+    rising: { theme: "Branded staples pass costs through", tickers: ["KO", "PG", "MKC", "GIS"] },
+    falling: { theme: "Consumer wallet freed for discretionary", tickers: ["SBUX", "CMG", "MCD"] },
+  },
+  "Energy": {
+    rising: { theme: "Producers benefit; watch refining margins", tickers: ["XOM", "CVX", "PSX", "XLE"] },
+    falling: { theme: "Tailwind for transport, industrials, airlines", tickers: ["DAL", "UPS", "XLI"] },
+  },
+  "Shelter": {
+    rising: { theme: "Apartment REITs capture rent growth", tickers: ["EQR", "MAA", "AVB"] },
+    falling: { theme: "Rate relief could lift homebuilders", tickers: ["DHI", "LEN", "PHM"] },
+  },
+  "Medical Care": {
+    rising: { theme: "Pharma & device cos. pricing above costs", tickers: ["JNJ", "LLY", "MDT", "ABT"] },
+    falling: { theme: "Managed care payers benefit on fixed contracts", tickers: ["UNH", "CVS", "HUM"] },
+  },
+  "Transportation": {
+    rising: { theme: "Freight pricing power; airlines raise fares", tickers: ["FDX", "UPS", "DAL", "CHRW"] },
+    falling: { theme: "Lower fuel = margin expansion for logistics", tickers: ["FDX", "UPS", "JBHT"] },
+  },
+  "Apparel": {
+    rising: { theme: "Premium brands with pricing power win", tickers: ["LULU", "RL", "TPR", "PVH"] },
+    falling: { theme: "Value retailers take share as consumers trade down", tickers: ["TJX", "ROST", "BURL"] },
+  },
+  "Recreation": {
+    rising: { theme: "Live events & experiences command premium pricing", tickers: ["LYV", "VICI", "MGM"] },
+    falling: { theme: "Budget consumers return; streaming vs. live shift", tickers: ["NFLX", "DIS"] },
+  },
+  "Used Vehicles": {
+    rising: { theme: "Auto dealers expand margins on used inventory", tickers: ["AN", "KMX", "LAD"] },
+    falling: { theme: "Leading indicator — watch new auto demand recovery", tickers: ["GM", "F", "TSLA"] },
+  },
+};
+
+function InflationBreakdown({ data }: { data: NonNullable<MacroData["inflation"]> }) {
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  const sorted = [...data.components]
+    .filter((c) => c.mom != null || c.yoy != null)
+    .sort((a, b) => (b.mom ?? b.yoy ?? 0) - (a.mom ?? a.yoy ?? 0));
+
+  const yoyColor = (v: number | null) =>
+    v == null ? "text-zinc-400" :
+    v > 5     ? "text-red-600 dark:text-red-400 font-bold" :
+    v > 3     ? "text-red-500" :
+    v > 2     ? "text-amber-600 dark:text-amber-400" :
+    v >= 0    ? "text-emerald-600 dark:text-emerald-400" :
+                "text-emerald-600 dark:text-emerald-400";
+
+  const barColor = (v: number | null) =>
+    v == null ? "bg-zinc-200 dark:bg-zinc-700" :
+    v > 5     ? "bg-red-600" :
+    v > 3     ? "bg-red-400" :
+    v > 2     ? "bg-amber-400" :
+                "bg-emerald-500";
+
+  const trendIcon = (t: string | null) =>
+    t === "accelerating" ? <span className="text-red-400 text-[10px]">↑</span> :
+    t === "decelerating" ? <span className="text-emerald-500 text-[10px]">↓</span> :
+    t === "stable"       ? <span className="text-zinc-400 text-[10px]">→</span> : null;
+
+  const maxYoy = Math.max(...sorted.map((c) => Math.abs(c.yoy ?? 0)), 1);
+
+  return (
+    <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-5">
+      <div className="flex items-start justify-between mb-4">
+        <div>
+          <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest">
+            Inflation Breakdown
+          </p>
+          <p className="text-xs text-zinc-400 mt-0.5">CPI components by MoM change · click a row for macro play</p>
+        </div>
+        {data.ppi.yoy != null && (
+          <div className="text-right">
+            <p className="text-[10px] text-zinc-400">PPI YoY</p>
+            <p className={`text-sm font-bold ${yoyColor(data.ppi.yoy)}`}>
+              {data.ppi.yoy > 0 ? "+" : ""}{data.ppi.yoy.toFixed(1)}%
+            </p>
+            <p className="text-[9px] text-zinc-400">Producer prices</p>
+          </div>
+        )}
+      </div>
+
+      {/* Column headers */}
+      <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-3 text-[10px] text-zinc-400 font-medium uppercase tracking-wider mb-2 px-0.5">
+        <span>Component</span>
+        <span className="text-right w-10">MoM</span>
+        <span className="text-right w-12">YoY</span>
+        <span className="text-right w-14">Sector</span>
+      </div>
+
+      <div className="space-y-1">
+        {sorted.map((c) => {
+          const play = MACRO_PLAYS[c.name];
+          const isRising = (c.mom ?? 0) > 0;
+          const activePlay = play ? (isRising ? play.rising : play.falling) : null;
+          const isOpen = expanded === c.name;
+
+          return (
+            <div key={c.name}>
+              <div
+                className={`rounded-lg px-2 py-1.5 cursor-pointer transition-colors ${isOpen ? "bg-zinc-50 dark:bg-zinc-800/60" : "hover:bg-zinc-50 dark:hover:bg-zinc-800/40"}`}
+                onClick={() => setExpanded(isOpen ? null : c.name)}
+              >
+                <div className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-x-3 mb-1.5">
+                  <span className="text-xs text-zinc-700 dark:text-zinc-300 flex items-center gap-1 truncate">
+                    {c.name}
+                    {trendIcon(c.trend)}
+                  </span>
+                  <span className="text-right text-[11px] tabular-nums w-10 text-zinc-500">
+                    {c.mom != null ? `${c.mom > 0 ? "+" : ""}${c.mom.toFixed(2)}%` : "—"}
+                  </span>
+                  <span className={`text-right text-[11px] tabular-nums font-semibold w-12 ${yoyColor(c.yoy)}`}>
+                    {c.yoy != null ? `${c.yoy > 0 ? "+" : ""}${c.yoy.toFixed(1)}%` : "—"}
+                  </span>
+                  <span className="text-right text-[9px] text-zinc-400 w-14 truncate">{c.sectorEtf}</span>
+                </div>
+                <div className="h-1 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all ${barColor(c.yoy)}`}
+                    style={{ width: `${Math.min((Math.abs(c.yoy ?? 0) / maxYoy) * 100, 100)}%` }}
+                  />
+                </div>
+
+                {/* Macro play drawer */}
+                {isOpen && activePlay && (
+                  <div className="mt-2.5 pt-2.5 border-t border-zinc-100 dark:border-zinc-700/50">
+                    <p className="text-[10px] font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1.5">
+                      {isRising ? "Rising · Macro Play" : "Falling · Macro Play"}
+                    </p>
+                    <p className="text-xs text-zinc-600 dark:text-zinc-300 mb-2">{activePlay.theme}</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {activePlay.tickers.map((t) => (
+                        <Link
+                          key={t}
+                          href={`/stocks/${t}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 text-[11px] font-semibold hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors"
+                        >
+                          {t}
+                        </Link>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* PPI vs CPI spread note */}
+      {data.ppi.yoy != null && sorted[0]?.yoy != null && (
+        <div className="mt-4 pt-3 border-t border-zinc-100 dark:border-zinc-800">
+          <p className="text-[10px] text-zinc-400 leading-relaxed">
+            <span className="font-medium text-zinc-500 dark:text-zinc-400">PPI–CPI spread:</span>{" "}
+            {data.ppi.yoy > (sorted.find(c => c.name === "Food & Beverages")?.yoy ?? 0)
+              ? "Producer prices running ahead of consumer prices — margin pressure risk for goods companies."
+              : "Consumer prices elevated relative to producer costs — companies may have pricing power."
+            }
+            {" "}↑ = accelerating MoM · ↓ = decelerating · → = stable.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function MacroPage() {
   const [data, setData] = useState<MacroData | null>(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    fetch("/api/macro")
+    fetch("/api/macro", { cache: "no-store" })
       .then((r) => r.json())
-      .then(setData)
+      .then((d) => { console.log("[macro] inflation:", d?.inflation); setData(d); })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
@@ -447,6 +630,11 @@ export default function MacroPage() {
                 })()}
               </div>
             </div>
+
+            {/* Inflation Breakdown */}
+            {data.inflation && data.inflation.components.length > 0 && (
+              <InflationBreakdown data={data.inflation} />
+            )}
 
             {/* Broad Market Index Cards */}
             <div>
